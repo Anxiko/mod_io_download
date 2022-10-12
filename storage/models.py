@@ -1,22 +1,12 @@
 import pydantic
-from pydantic import Field, StrictStr
-
-from api_client.models.game import Game
-from api_client.models.mod import Mod
-from api_client.models.mod_file import ModFile
+from pydantic import Field, StrictInt
 
 
-class StorageMod(pydantic.BaseModel):
-	downloaded_filename: StrictStr
-	downloaded_hash: StrictStr
-	mod_data: Mod
-	mod_file_data: ModFile
-
-
-class StorageGame(pydantic.BaseModel):
-	data: Game
-	mods: dict[StrictStr, StorageMod]
+class StoredModFile(pydantic.BaseModel):
+	mod_file_id: StrictInt
+	file_path: str
+	file_hash: str
 
 
 class Storage(pydantic.BaseModel):
-	games: dict[StrictStr, StorageGame] = Field(default_factory=dict)
+	games: dict[str, dict[str, StoredModFile]] = Field(default_factory=dict)

@@ -88,7 +88,7 @@ def _filter_necessary_downloads(
 	))
 
 
-def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> None:
+def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadResult]:
 	DOWNLOADS_PATH.mkdir(exist_ok=True)
 
 	download_tasks: list[DownloadTask] = list(map(
@@ -98,7 +98,7 @@ def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> None:
 
 	downloader_client: DownloaderClient = DownloaderClient(download_tasks)
 	results: list[DownloadResult] = asyncio.run(downloader_client.download())
-	pprint(results)
+	return results
 
 
 def _get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
@@ -108,6 +108,12 @@ def _get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	if len(games) > 1:
 		raise ValueError(f"Found too many games ({len(games)}) for {name_id=!r}")
 	return games[0]
+
+
+def _updated_storage_with_results(storage: ModStorageManager, download_results: list[DownloadResult]) -> None:
+	storage.update_storage(
+		filter(DownloadResult.is_ok, download_results)
+	)
 
 
 def main() -> None:
@@ -122,15 +128,14 @@ def main() -> None:
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
 	)
 
-	storage_manager: ModStorageManager = ModStorageManager.from_file(DOWNLOADS_PATH)
+	storage_manager: ModStorageManager = ModStorageManager.from_file()
 
 	download_tasks: list[DownloadTask] = list(map(partial(_to_download_task, client, bonelab_game), my_mods))
 	filtered_download_tasks: list[DownloadTask] = _filter_necessary_downloads(storage_manager, download_tasks)
 
 	pprint(filtered_download_tasks)
-
-
-# _download_mods(client, bonelab_game, my_mods)
+	results: list[DownloadResult] = _download_mods(client, bonelab_game, my_mods)
+	_updated_storage_with_results(storage_manager, results)
 
 
 if __name__ == '__main__':
