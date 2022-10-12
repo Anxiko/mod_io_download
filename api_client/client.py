@@ -1,4 +1,5 @@
 from enum import Enum
+from io import FileIO
 from string import Template
 from typing import Type, TypeVar
 from urllib.parse import urljoin
@@ -7,14 +8,10 @@ import pydantic
 from requests import Request, Response, Session
 
 from .response import PaginatedResponse
-from .models import Game, Mod
+from .models import Game, Mod, ModFile
 
 ResponseType = TypeVar("ResponseType", bound=pydantic.BaseModel)
 InnerResponseType = TypeVar("InnerResponseType", bound=pydantic.BaseModel)
-
-
-class RequestMethod(Enum):
-	GET = 'GET'
 
 
 class ApiClient:
@@ -23,6 +20,9 @@ class ApiClient:
 	_api_url: str
 
 	_GET_MODS_ENDPOINT_TEMPLATE: Template = Template('games/${game_id}/mods')
+	_GET_MOD_FILES_ENDPOINT_TEMPLATE: Template = Template('games/${game_id}/mods/${mod_id}/files')
+	_DOWNLOAD_MOD_FILE_ENDPOINT_TEMPLATE: Template = Template('mods/file/${mod_file_id}')
+	_FILE_MAX_SIZE: int = 500 * (1024 ** 2)  # 500MiB
 
 	def __init__(self, api_key: str, oauth_key: str, api_url: str):
 		self._api_key = api_key
@@ -44,8 +44,15 @@ class ApiClient:
 
 			return response_type.parse_obj(response.json())
 
-	def _create_request(self, method: RequestMethod, endpoint: str) -> Request:
-		return Request(method.value, self._form_url(endpoint))
+	@staticmethod
+	def _run_file_request(request: Request, fp: FileIO) -> None:
+		with Session(stream=True) as s:
+			response: Response = s.send(request.prepare())
+			response.raise_for_status()
+
+			file_chunk: bytes
+			for file_chunk in response.iter_content():
+				fp.write(file_chunk)
 
 	@staticmethod
 	def _add_offset(request: Request, offset: int = 0) -> None:
@@ -85,3 +92,16 @@ class ApiClient:
 		request: Request = Request('GET', self._form_url('me/subscribed'))
 		self._add_oauth_authorization(request)
 		return self._make_paginated_request(request, Mod)
+
+	def get_mod_files(self, game_id: int, mod_id: int) -> list[ModFile]:
+		request: Request = Request(
+			'GET', self._form_url(self._GET_MOD_FILES_ENDPOINT_TEMPLATE, game_id=game_id, mod_id=mod_id)
+		)
+		self._add_api_key_authorization(request)
+		return self._make_paginated_request(request, ModFile)
+
+	def download_mod_file(self, mod_file_id: int, fp: FileIO) -> None:
+		request: Request = Request(
+			'GET', self._form_url(self._DOWNLOAD_MOD_FILE_ENDPOINT_TEMPLATE, mod_file_id=mod_file_id)
+		)
+		self._run_file_request(request, fp)

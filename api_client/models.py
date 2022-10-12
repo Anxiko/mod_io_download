@@ -1,7 +1,27 @@
 from enum import Enum
-from typing import Callable
+from typing import Callable, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, StrictInt, StrictStr, validator
+from pydantic import BaseModel, HttpUrl, StrictInt, StrictStr
+
+
+class TargetPlatform(Enum):
+	WINDOWS = 'windows'
+	MAC = 'mac'
+	LINUX = 'linux'
+	ANDROID = 'android'
+	IOS = 'ios'
+	XBOX_ONE = 'xboxone'
+	XBOX_SERIES_X = 'xboxseriesx'
+	PS4 = 'ps4'
+	PS5 = 'ps5'
+	SWITCH = 'switch'
+	OCULUS = 'oculus'
+
+
+class ModFilePlatformStatus(Enum):
+	PENDING = 0
+	APPROVED = 1
+	DENIED = 2
 
 
 class VirusStatus(Enum):
@@ -18,17 +38,34 @@ class Download(BaseModel):
 	date_expires: int
 
 
+class ModPlatform(BaseModel):
+	platform: TargetPlatform
+	modfile_live: StrictInt
+
+	@classmethod
+	def filter_by_platform(cls, platform: TargetPlatform) -> Callable[['ModPlatform'], bool]:
+		def f(mod_platform: 'ModPlatform') -> bool:
+			return mod_platform.platform == platform
+
+		return f
+
+
+class ModFilePlatform(BaseModel):
+	platform: TargetPlatform
+	status: ModFilePlatformStatus
+
+
 class ModFile(BaseModel):
 	id: StrictInt
 	mod_id: StrictInt
 	virus_status: VirusStatus
 	virus_positive: bool
+	filesize: StrictInt
+	filehash: dict
+	filename: StrictStr
+	version: Optional[StrictStr]
 	download: Download
-
-
-class ModPlatform(BaseModel):
-	platform: StrictStr
-	modfile_live: StrictInt
+	platforms: list[ModFilePlatform]
 
 
 class Mod(BaseModel):
@@ -38,6 +75,16 @@ class Mod(BaseModel):
 	name_id: StrictStr
 	modfile: ModFile
 	platforms: list[ModPlatform]
+
+	def with_platform_download(self, platform: TargetPlatform) -> tuple['Mod', 'ModPlatform'] | None:
+		try:
+			mod_platform: ModPlatform = next(filter(
+				ModPlatform.filter_by_platform(platform),
+				self.platforms
+			))
+			return self, mod_platform
+		except StopIteration:
+			return None
 
 
 class Game(BaseModel):
