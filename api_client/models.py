@@ -54,6 +54,13 @@ class ModFilePlatform(BaseModel):
 	platform: TargetPlatform
 	status: ModFilePlatformStatus
 
+	@classmethod
+	def filter_by_platform(cls, platform: TargetPlatform) -> Callable[['ModFilePlatform'], bool]:
+		def f(mod_file_platform: 'ModFilePlatform') -> bool:
+			return mod_file_platform.platform == platform
+
+		return f
+
 
 class ModFile(BaseModel):
 	id: StrictInt
@@ -66,6 +73,24 @@ class ModFile(BaseModel):
 	version: Optional[StrictStr]
 	download: Download
 	platforms: list[ModFilePlatform]
+
+	def has_platform_support(self, platform: TargetPlatform) -> bool:
+		return any(filter(
+			ModFilePlatform.filter_by_platform(platform),
+			self.platforms
+		))
+
+	@classmethod
+	def filter_by_platform_support(cls, platform: TargetPlatform) -> Callable[['ModFile'], bool]:
+		def f(mod_file: 'ModFile') -> bool:
+			return mod_file.has_platform_support(platform)
+
+		return f
+
+	def sort_by_version_key(self) -> str:
+		if self.version is None:
+			return ""
+		return self.version
 
 
 class Mod(BaseModel):

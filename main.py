@@ -1,3 +1,4 @@
+from pathlib import Path
 from pprint import pprint
 
 from api_client.client import ApiClient
@@ -19,6 +20,32 @@ def _get_mod_with_windows_download(mods: list[Mod]) -> tuple[Mod, ModPlatform]:
 	))
 
 
+def _get_latest_windows_mod_file(mod_files: list[ModFile]) -> ModFile:
+	sorted_windows_mod_files: list[ModFile] = sorted(
+		filter(
+			ModFile.filter_by_platform_support(TargetPlatform.WINDOWS),
+			mod_files
+		),
+		key=ModFile.sort_by_version_key,
+		reverse=True
+	)
+	return sorted_windows_mod_files[0]
+
+
+def _generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetPlatform) -> str:
+	name: str = '_'.join(filter(bool, [game.name_id, mod.name_id, mod_file.version, platform.value]))
+	extension: str = ''.join(Path(mod_file.filename).suffixes)
+	return f'{name}{extension}'
+
+
+DOWNLOADS_PATH: Path = Path('./downloads')
+
+
+def _download_mod_file(filename: str, mod_file: ModFile, client: ApiClient) -> None:
+	with open(DOWNLOADS_PATH / filename, mode='wb') as f:
+		client.download_mod_file(mod_file, f)
+
+
 def main() -> None:
 	config: Config = Config.from_file()
 	client: ApiClient = ApiClient(api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token)
@@ -35,8 +62,14 @@ def main() -> None:
 	mod: Mod
 	mod_platform: ModPlatform
 	mod, mod_platform = mod_with_platform
+	game: Game = client.get_game_by_id(mod.game_id)
 	mod_files: list[ModFile] = client.get_mod_files(mod.game_id, mod.id)
-	pprint(mod_files)
+
+	latest_windows_mod_file: ModFile = _get_latest_windows_mod_file(mod_files)
+
+	print(latest_windows_mod_file)
+	filename: str = _generate_filename(game, mod, latest_windows_mod_file, TargetPlatform.WINDOWS)
+	_download_mod_file(filename, latest_windows_mod_file, client)
 
 
 if __name__ == '__main__':
