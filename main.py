@@ -4,7 +4,6 @@ import os
 from functools import partial
 from logging import Logger
 from pathlib import Path
-from pprint import pprint
 
 from api_client.client import ApiClient
 from api_client.models.game import Game
@@ -14,13 +13,15 @@ from api_client.models.platform import TargetPlatform
 from config import Config
 from downloader_client.client import DownloaderClient
 from downloader_client.task import DownloadResult, DownloadTask
+from logger import get_logger
+from logger.logger import logger_set_up
 from storage.manager import ModStorageManager
 
 DOWNLOADS_PATH: Path = Path('./downloads')
 BONELAB_NAME_ID: str = 'bonelab'
 PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
 
-logger: Logger = logging.getLogger(__name__)
+logger: Logger = get_logger(__name__)
 
 
 def generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetPlatform) -> str:
@@ -57,14 +58,7 @@ def filter_necessary_downloads(
 	))
 
 
-def download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadResult]:
-	DOWNLOADS_PATH.mkdir(exist_ok=True)
-
-	download_tasks: list[DownloadTask] = list(map(
-		partial(to_download_task, client, game),
-		mods
-	))
-
+def download_mods(download_tasks: list[DownloadTask]) -> list[DownloadResult]:
 	downloader_client: DownloaderClient = DownloaderClient(download_tasks)
 	results: list[DownloadResult] = asyncio.run(downloader_client.download())
 	return results
@@ -79,33 +73,65 @@ def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	return games[0]
 
 
-def updated_storage_with_results(storage: ModStorageManager, download_results: list[DownloadResult]) -> None:
-	storage.update_storage(
-		filter(DownloadResult.is_ok, download_results)
-	)
+def split_download_results(
+		download_results: list[DownloadResult]
+) -> tuple[list[DownloadResult], list[DownloadResult]]:
+	downloads_ok: list[DownloadResult] = []
+	downloads_error: list[DownloadResult] = []
+
+	for download_result in download_results:
+		if download_result.is_ok():
+			downloads_ok.append(download_result)
+		else:
+			downloads_error.append(download_result)
+
+	return downloads_ok, downloads_error
 
 
 def main() -> None:
+	logger.info("Starting...")
 	config: Config = Config.from_file()
 	client: ApiClient = ApiClient(
 		api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token
 	)
 
 	bonelab_game: Game = get_game_by_name_id(client, BONELAB_NAME_ID)
+	logger.debug(f"Got target game: {bonelab_game}")
 
 	my_mods: list[Mod] = client.get_mod_subscriptions(
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
 	)
+	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
+	logger.debug(f"{my_mods=}")
 
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 
 	download_tasks: list[DownloadTask] = list(map(partial(to_download_task, client, bonelab_game), my_mods))
-	filtered_download_tasks: list[DownloadTask] = filter_necessary_downloads(storage_manager, download_tasks)
+	logger.info(f"Generated {len(download_tasks)} download task(s)")
+	logger.debug(f"{download_tasks=}")
 
-	pprint(filtered_download_tasks)
-	results: list[DownloadResult] = download_mods(client, bonelab_game, my_mods)
-	updated_storage_with_results(storage_manager, results)
+	filtered_download_tasks: list[DownloadTask] = filter_necessary_downloads(storage_manager, download_tasks)
+	logger.info(f"Filtered needed downloads to {len(filtered_download_tasks)}")
+	logger.debug(f"{filtered_download_tasks=}")
+
+	results: list[DownloadResult] = download_mods(filtered_download_tasks)
+	logger.info(f"Generated {len(results)} result(s)")
+	logger.debug(f"{results=}")
+
+	results_ok, results_error = split_download_results(results)
+	if results_ok:
+		logger.info(f"{results_ok} download(s) OK")
+	if results_error:
+		logger.warning(f"{len(results_error)} download(s) failed")
+		for result_error in results_error:
+			logger.debug(result_error)
+
+	logger.info(f"Updating storage manager with correct results")
+	storage_manager.update_storage(results_ok)
+
+	logger.info(f"Closing...")
 
 
 if __name__ == '__main__':
+	logger_set_up()
 	main()

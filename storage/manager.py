@@ -64,7 +64,7 @@ class ModStorageManager:
 			return False
 
 		calculated_hash: str = self._hash_md5(file_path)
-		return stored_mod_file.file_path == calculated_hash
+		return stored_mod_file.file_hash == calculated_hash
 
 	def _validate(self) -> None:
 		validated_games: dict[str, dict[str, StoredModFile]] = {}
@@ -84,7 +84,7 @@ class ModStorageManager:
 			return None
 
 	def needs_download(self, download_task: DownloadTask) -> bool:
-		mod: StoredModFile | None = self._get_mod(download_task.game.name, download_task.mod.name)
+		mod: StoredModFile | None = self._get_mod(download_task.game.name_id, download_task.mod.name_id)
 		if mod is None:
 			return True
 		return mod.mod_file_id != download_task.mod_file.id

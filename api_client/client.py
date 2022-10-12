@@ -1,3 +1,4 @@
+import logging
 from string import Template
 from typing import BinaryIO, Optional, Type, TypeVar
 from urllib.parse import urljoin
@@ -5,11 +6,14 @@ from urllib.parse import urljoin
 import pydantic
 from requests import Request, Response, Session
 
+from logger import get_logger
 from .models.game import Game
 from .models.mod import Mod
 from .models.mod_file import ModFile
 from .models.platform import TargetPlatform
 from .response import PaginatedResponse
+
+logger: logging.Logger = get_logger(__name__)
 
 ResponseType = TypeVar("ResponseType", bound=pydantic.BaseModel)
 InnerResponseType = TypeVar("InnerResponseType", bound=pydantic.BaseModel)
@@ -34,9 +38,6 @@ class ApiClient:
 	_oauth_key: str
 	_api_url: str
 
-	_GET_GAME_ENDPOINT: Template = Template('games/${game_id}')
-	_GET_ALL_MODS_ENDPOINT: Template = Template('games/${game_id}/mods')
-	_GET_ALL_MOD_FILES_ENDPOINT: Template = Template('games/${game_id}/mods/${mod_id}/files')
 	_GET_MOD_FILE_ENDPOINT: Template = Template('games/${game_id}/mods/${mod_id}/files/${mod_file_id}')
 	_FILE_MAX_SIZE: int = 500 * (1024 ** 2)  # 500MiB
 
@@ -88,7 +89,8 @@ class ApiClient:
 	def _add_oauth_authorization(self, request: Request) -> None:
 		request.headers['Authorization'] = f'Bearer {self._oauth_key}'
 
-	def _add_platform(self, request: Request, platform: TargetPlatform) -> None:
+	@staticmethod
+	def _add_platform(request: Request, platform: TargetPlatform) -> None:
 		request.headers['X-Modio-Platform'] = platform.value
 
 	def _run_paginated_request(
@@ -105,26 +107,18 @@ class ApiClient:
 			offset = paginated_response.next_offset()
 		return rv
 
-	def get_game_by_id(self, game_id: int) -> Game:
-		request: Request = Request('GET', self._form_url(self._GET_GAME_ENDPOINT, game_id=game_id))
-		self._add_api_key_authorization(request)
-		return self._run_request(request, Game)
-
 	def get_games(self, name_id: Optional[str] = None) -> list[Game]:
+		logger.info(f"Getting all games, {name_id=}")
 		request: Request = Request('GET', self._form_url('games'))
 		if name_id is not None:
 			request.params['name_id'] = name_id
 		self._add_api_key_authorization(request)
 		return self._run_paginated_request(request, Game)
 
-	def get_game_mods(self, game_id: int) -> list[Mod]:
-		request: Request = Request('GET', self._form_url(self._GET_ALL_MODS_ENDPOINT, game_id=game_id))
-		self._add_api_key_authorization(request)
-		return self._run_paginated_request(request, Mod)
-
 	def get_mod_subscriptions(
 			self, game_id: Optional[int] = None, platform: TargetPlatform = None
 	) -> list[Mod]:
+		logger.info(f"Getting mod subscriptions, {game_id=}, {platform=}")
 		request: Request = Request('GET', self._form_url('me/subscribed'))
 		if game_id is not None:
 			request.params['game_id'] = game_id
@@ -136,6 +130,7 @@ class ApiClient:
 		return self._run_paginated_request(request, Mod)
 
 	def get_mod_file_by_id(self, game_id: int, mod_id: int, mod_file_id: int) -> ModFile:
+		logger.info(f"Getting mod file for {game_id=}, {mod_id=}, {mod_file_id=}")
 		request: Request = Request(
 			'GET',
 			self._form_url(
@@ -144,16 +139,3 @@ class ApiClient:
 		)
 		self._add_api_key_authorization(request)
 		return self._run_request(request, ModFile)
-
-	def get_mod_files(self, game_id: int, mod_id: int) -> list[ModFile]:
-		request: Request = Request(
-			'GET', self._form_url(self._GET_ALL_MOD_FILES_ENDPOINT, game_id=game_id, mod_id=mod_id)
-		)
-		self._add_api_key_authorization(request)
-		return self._run_paginated_request(request, ModFile)
-
-	def download_mod_file(self, mod_file: ModFile, fp: BinaryIO) -> None:
-		request: Request = Request(
-			'GET', mod_file.download.binary_url
-		)
-		self._run_file_request(request, fp)
