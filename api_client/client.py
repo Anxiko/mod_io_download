@@ -6,7 +6,8 @@ from urllib.parse import urljoin
 import pydantic
 from requests import Request, Response, Session
 
-from .response import Game, Mod, PaginatedResponse
+from .response import PaginatedResponse
+from .models import Game, Mod
 
 ResponseType = TypeVar("ResponseType", bound=pydantic.BaseModel)
 InnerResponseType = TypeVar("InnerResponseType", bound=pydantic.BaseModel)

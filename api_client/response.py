@@ -1,6 +1,6 @@
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
-from pydantic import BaseModel, StrictInt, StrictStr
+from pydantic import StrictInt
 from pydantic.generics import GenericModel
 
 ResponseType = TypeVar("ResponseType")
@@ -21,23 +21,3 @@ class PaginatedResponse(GenericModel, Generic[ResponseType]):
 		if rv >= self.result_total:
 			return None
 		return rv
-
-
-class Game(BaseModel):
-	id: StrictInt
-	name: StrictStr
-	name_id: StrictStr
-
-	@staticmethod
-	def filter_by_name(name: str) -> Callable[['Game'], bool]:
-		def f(game: 'Game') -> bool:
-			return game.name_id == name
-
-		return f
-
-
-class Mod(BaseModel):
-	id: StrictInt
-	game_id: StrictInt
-	name: StrictStr
-	name_id: StrictStr
