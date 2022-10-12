@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from functools import partial
 from logging import Logger
 from pathlib import Path
@@ -13,6 +14,7 @@ from api_client.models.platform import TargetPlatform
 from config import Config
 from downloader_client.client import DownloaderClient
 from downloader_client.task import DownloadResult, DownloadTask
+from storage.manager import ModStorageManager
 
 DOWNLOADS_PATH: Path = Path('./downloads')
 BONELAB_NAME_ID: str = 'bonelab'
@@ -65,12 +67,25 @@ def _to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 	)
 
 	filename: str = _generate_filename(game, mod, mod_file, PLATFORM)
-	file_path: Path = DOWNLOADS_PATH / filename
+	dir_path: Path = DOWNLOADS_PATH / game.name_id / mod.name_id
+	os.makedirs(dir_path, exist_ok=True)
 
 	return DownloadTask(
-		download_file_path=file_path,
-		download_url=str(mod_file.download.binary_url)
+		download_file_path=dir_path / filename,
+		download_url=str(mod_file.download.binary_url),
+		game=game,
+		mod=mod,
+		mod_file=mod_file
 	)
+
+
+def _filter_necessary_downloads(
+		storage_manager: ModStorageManager, download_tasks: list[DownloadTask]
+) -> list[DownloadTask]:
+	return list(filter(
+		storage_manager.needs_download,
+		download_tasks
+	))
 
 
 def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> None:
@@ -107,7 +122,15 @@ def main() -> None:
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
 	)
 
-	_download_mods(client, bonelab_game, my_mods)
+	storage_manager: ModStorageManager = ModStorageManager.from_file(DOWNLOADS_PATH)
+
+	download_tasks: list[DownloadTask] = list(map(partial(_to_download_task, client, bonelab_game), my_mods))
+	filtered_download_tasks: list[DownloadTask] = _filter_necessary_downloads(storage_manager, download_tasks)
+
+	pprint(filtered_download_tasks)
+
+
+# _download_mods(client, bonelab_game, my_mods)
 
 
 if __name__ == '__main__':

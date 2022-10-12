@@ -38,13 +38,17 @@ class ModFilePlatform(BaseModel):
 		return f
 
 
+class Filehash(BaseModel):
+	md5: StrictStr
+
+
 class ModFile(BaseModel):
 	id: StrictInt
 	mod_id: StrictInt
 	virus_status: VirusStatus
 	virus_positive: bool
 	filesize: StrictInt
-	filehash: dict
+	filehash: Filehash
 	filename: StrictStr
 	version: Optional[StrictStr]
 	download: Download
