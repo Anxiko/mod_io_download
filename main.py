@@ -1,31 +1,20 @@
-import json
-from dataclasses import dataclass
 from pprint import pprint
-from typing import Any, ClassVar
 
 from api_client.client import ApiClient
-from api_client.response import Game
+from api_client.response import Game, Mod
+from config import Config
 
 
-@dataclass
-class Config:
-	_FILENAME: ClassVar[str] = "config.json"
-	api_key: str
-	api_url: str
-
-	@classmethod
-	def from_file(cls) -> 'Config':
-		with open(cls._FILENAME, encoding='utf8') as f:
-			raw: dict[str, Any] = json.load(f)
-			return cls(**raw)
+def _get_game_by_name(games: list[Game], name: str) -> Game:
+	return next(filter(Game.filter_by_name(name), games))
 
 
 def main() -> None:
 	config: Config = Config.from_file()
-	client: ApiClient = ApiClient(api_url=config.api_url, api_key=config.api_key)
+	client: ApiClient = ApiClient(api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token)
 
-	games: list[Game] = client.get_games()
-	pprint(games)
+	my_mods: list[Mod] = client.get_mod_subscriptions()
+	pprint(my_mods)
 
 
 if __name__ == '__main__':
