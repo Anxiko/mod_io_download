@@ -23,50 +23,19 @@ PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
 logger: Logger = logging.getLogger(__name__)
 
 
-def _get_game_by_name(games: list[Game], name: str) -> Game:
-	return next(filter(Game.filter_by_name(name), games))
-
-
-def _get_mod_with_windows_download(mods: list[Mod]) -> tuple[Mod, ModPlatform]:
-	return next(filter(
-		lambda x: x is not None,
-		map(
-			lambda x: x.with_platform_download(TargetPlatform.WINDOWS),
-			mods
-		)
-	))
-
-
-def _get_latest_windows_mod_file(mod_files: list[ModFile]) -> ModFile:
-	sorted_windows_mod_files: list[ModFile] = sorted(
-		filter(
-			ModFile.filter_by_platform_support(TargetPlatform.WINDOWS),
-			mod_files
-		),
-		key=ModFile.sort_by_version_key,
-		reverse=True
-	)
-	return sorted_windows_mod_files[0]
-
-
-def _generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetPlatform) -> str:
+def generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetPlatform) -> str:
 	name: str = '_'.join(filter(bool, [game.name_id, mod.name_id, mod_file.version, platform.value]))
 	extension: str = ''.join(Path(mod_file.filename).suffixes)
 	return f'{name}{extension}'
 
 
-def _download_mod_file(filename: str, mod_file: ModFile, client: ApiClient) -> None:
-	with open(DOWNLOADS_PATH / filename, mode='wb') as f:
-		client.download_mod_file(mod_file, f)
-
-
-def _to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
+def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 	mod_platform: ModPlatform = mod.get_platform(PLATFORM)
 	mod_file: ModFile = client.get_mod_file_by_id(
 		game_id=game.id, mod_id=mod.id, mod_file_id=mod_platform.modfile_live
 	)
 
-	filename: str = _generate_filename(game, mod, mod_file, PLATFORM)
+	filename: str = generate_filename(game, mod, mod_file, PLATFORM)
 	dir_path: Path = DOWNLOADS_PATH / game.name_id / mod.name_id
 	os.makedirs(dir_path, exist_ok=True)
 
@@ -79,7 +48,7 @@ def _to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 	)
 
 
-def _filter_necessary_downloads(
+def filter_necessary_downloads(
 		storage_manager: ModStorageManager, download_tasks: list[DownloadTask]
 ) -> list[DownloadTask]:
 	return list(filter(
@@ -88,11 +57,11 @@ def _filter_necessary_downloads(
 	))
 
 
-def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadResult]:
+def download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadResult]:
 	DOWNLOADS_PATH.mkdir(exist_ok=True)
 
 	download_tasks: list[DownloadTask] = list(map(
-		partial(_to_download_task, client, game),
+		partial(to_download_task, client, game),
 		mods
 	))
 
@@ -101,7 +70,7 @@ def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> list[Downl
 	return results
 
 
-def _get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
+def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	games: list[Game] = client.get_games(name_id=name_id)
 	if len(games) == 0:
 		raise ValueError(f"Found no games for {name_id=!r}")
@@ -110,7 +79,7 @@ def _get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	return games[0]
 
 
-def _updated_storage_with_results(storage: ModStorageManager, download_results: list[DownloadResult]) -> None:
+def updated_storage_with_results(storage: ModStorageManager, download_results: list[DownloadResult]) -> None:
 	storage.update_storage(
 		filter(DownloadResult.is_ok, download_results)
 	)
@@ -122,7 +91,7 @@ def main() -> None:
 		api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token
 	)
 
-	bonelab_game: Game = _get_game_by_name_id(client, BONELAB_NAME_ID)
+	bonelab_game: Game = get_game_by_name_id(client, BONELAB_NAME_ID)
 
 	my_mods: list[Mod] = client.get_mod_subscriptions(
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
@@ -130,12 +99,12 @@ def main() -> None:
 
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 
-	download_tasks: list[DownloadTask] = list(map(partial(_to_download_task, client, bonelab_game), my_mods))
-	filtered_download_tasks: list[DownloadTask] = _filter_necessary_downloads(storage_manager, download_tasks)
+	download_tasks: list[DownloadTask] = list(map(partial(to_download_task, client, bonelab_game), my_mods))
+	filtered_download_tasks: list[DownloadTask] = filter_necessary_downloads(storage_manager, download_tasks)
 
 	pprint(filtered_download_tasks)
-	results: list[DownloadResult] = _download_mods(client, bonelab_game, my_mods)
-	_updated_storage_with_results(storage_manager, results)
+	results: list[DownloadResult] = download_mods(client, bonelab_game, my_mods)
+	updated_storage_with_results(storage_manager, results)
 
 
 if __name__ == '__main__':
