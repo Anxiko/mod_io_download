@@ -3,19 +3,7 @@ from typing import Callable, Optional
 
 from pydantic import BaseModel, HttpUrl, StrictInt, StrictStr
 
-
-class TargetPlatform(Enum):
-	WINDOWS = 'windows'
-	MAC = 'mac'
-	LINUX = 'linux'
-	ANDROID = 'android'
-	IOS = 'ios'
-	XBOX_ONE = 'xboxone'
-	XBOX_SERIES_X = 'xboxseriesx'
-	PS4 = 'ps4'
-	PS5 = 'ps5'
-	SWITCH = 'switch'
-	OCULUS = 'oculus'
+from .platform import TargetPlatform
 
 
 class ModFilePlatformStatus(Enum):
@@ -36,18 +24,6 @@ class VirusStatus(Enum):
 class Download(BaseModel):
 	binary_url: HttpUrl
 	date_expires: int
-
-
-class ModPlatform(BaseModel):
-	platform: TargetPlatform
-	modfile_live: StrictInt
-
-	@classmethod
-	def filter_by_platform(cls, platform: TargetPlatform) -> Callable[['ModPlatform'], bool]:
-		def f(mod_platform: 'ModPlatform') -> bool:
-			return mod_platform.platform == platform
-
-		return f
 
 
 class ModFilePlatform(BaseModel):
@@ -91,35 +67,3 @@ class ModFile(BaseModel):
 		if self.version is None:
 			return ""
 		return self.version
-
-
-class Mod(BaseModel):
-	id: StrictInt
-	game_id: StrictInt
-	name: StrictStr
-	name_id: StrictStr
-	modfile: ModFile
-	platforms: list[ModPlatform]
-
-	def with_platform_download(self, platform: TargetPlatform) -> tuple['Mod', 'ModPlatform'] | None:
-		try:
-			mod_platform: ModPlatform = next(filter(
-				ModPlatform.filter_by_platform(platform),
-				self.platforms
-			))
-			return self, mod_platform
-		except StopIteration:
-			return None
-
-
-class Game(BaseModel):
-	id: StrictInt
-	name: StrictStr
-	name_id: StrictStr
-
-	@staticmethod
-	def filter_by_name(name: str) -> Callable[['Game'], bool]:
-		def f(game: 'Game') -> bool:
-			return game.name_id == name
-
-		return f
