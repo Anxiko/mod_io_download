@@ -13,6 +13,12 @@ def main() -> None:
 	config: Config = Config.from_file()
 	client: ApiClient = ApiClient(api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token)
 
+	games: list[Game] = client.get_games()
+	bonelab: Game = _get_game_by_name(games, 'bonelab')
+
+	bonelab_mods: list[Mod] = client.get_game_mods(bonelab.id)
+	pprint(bonelab_mods)
+
 	my_mods: list[Mod] = client.get_mod_subscriptions()
 	pprint(my_mods)
 

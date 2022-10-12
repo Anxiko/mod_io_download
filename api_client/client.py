@@ -28,7 +28,11 @@ class ApiClient:
 		self._oauth_key = oauth_key
 		self._api_url = api_url
 
-	def _form_url(self, endpoint: str) -> str:
+	def _form_url(self, endpoint: str | Template, **kwargs) -> str:
+		if isinstance(endpoint, Template):
+			endpoint = endpoint.substitute(kwargs)
+		elif kwargs:
+			raise TypeError("Can't substitute from str endpoint")
 		return urljoin(self._api_url, endpoint)
 
 	@staticmethod
@@ -53,17 +57,11 @@ class ApiClient:
 		request.headers['Authorization'] = f'Bearer {self._oauth_key}'
 
 	def _make_paginated_request(
-			self, method: RequestMethod, endpoint: str, response_type: Type[InnerResponseType],
-			use_api_key: bool = False, use_oauth: bool = False
+			self, request: Request, response_type: Type[InnerResponseType]
 	) -> list[InnerResponseType]:
 		offset: int = 0
 		rv: list[InnerResponseType] = []
 		while offset is not None:
-			request: Request = self._create_request(method, endpoint)
-			if use_oauth:
-				self._add_oauth_authorization(request)
-			if use_api_key:
-				self._add_api_key_authorization(request)
 			self._add_offset(request, offset)
 			paginated_response: PaginatedResponse[response_type] = self._run_request(
 				request, PaginatedResponse[response_type]
@@ -73,15 +71,16 @@ class ApiClient:
 		return rv
 
 	def get_games(self) -> list[Game]:
-		return self._make_paginated_request(RequestMethod.GET, 'games', Game, use_api_key=True)
+		request: Request = Request('GET', self._form_url('games'))
+		self._add_api_key_authorization(request)
+		return self._make_paginated_request(request, Game)
 
 	def get_game_mods(self, game_id: int) -> list[Mod]:
-		return self._make_paginated_request(
-			RequestMethod.GET,
-			type(self)._GET_MODS_ENDPOINT_TEMPLATE.substitute(game_id=game_id),
-			Mod,
-			use_api_key=True
-		)
+		request: Request = Request('GET', self._form_url(self._GET_MODS_ENDPOINT_TEMPLATE, game_id=game_id))
+		self._add_api_key_authorization(request)
+		return self._make_paginated_request(request, Mod)
 
 	def get_mod_subscriptions(self) -> list[Mod]:
-		return self._make_paginated_request(RequestMethod.GET, 'me/subscribed', Mod, use_oauth=True)
+		request: Request = Request('GET', self._form_url('me/subscribed'))
+		self._add_oauth_authorization(request)
+		return self._make_paginated_request(request, Mod)
