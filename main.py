@@ -1,5 +1,5 @@
+import asyncio
 import logging
-from dataclasses import dataclass
 from functools import partial
 from logging import Logger
 from pathlib import Path
@@ -11,18 +11,14 @@ from api_client.models.mod import Mod, ModPlatform
 from api_client.models.mod_file import ModFile
 from api_client.models.platform import TargetPlatform
 from config import Config
+from downloader_client.client import DownloaderClient
+from downloader_client.task import DownloadResult, DownloadTask
 
 DOWNLOADS_PATH: Path = Path('./downloads')
 BONELAB_NAME_ID: str = 'bonelab'
 PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
 
 logger: Logger = logging.getLogger(__name__)
-
-
-@dataclass
-class DownloadTask:
-	download_file_path: Path
-	download_url: str
 
 
 def _get_game_by_name(games: list[Game], name: str) -> Game:
@@ -78,11 +74,16 @@ def _to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 
 
 def _download_mods(client: ApiClient, game: Game, mods: list[Mod]) -> None:
+	DOWNLOADS_PATH.mkdir(exist_ok=True)
+
 	download_tasks: list[DownloadTask] = list(map(
 		partial(_to_download_task, client, game),
 		mods
 	))
-	pprint(download_tasks)
+
+	downloader_client: DownloaderClient = DownloaderClient(download_tasks)
+	results: list[DownloadResult] = asyncio.run(downloader_client.download())
+	pprint(results)
 
 
 def _get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
