@@ -109,3 +109,15 @@ class ModStorageManager:
 
 			self._storage.games.setdefault(game_name_id, {})[mod_name_id] = stored_mod_file
 		self._save_to_file()
+
+	def list_mod_files(self, game_name_id: str) -> list[Path]:
+		mods_dict: dict[str, StoredModFile]
+		try:
+			mods_dict = self._storage.games[game_name_id]
+		except KeyError:
+			return list()
+
+		return list(map(
+			StoredModFile.get_as_path,
+			mods_dict.values()
+		))

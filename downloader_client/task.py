@@ -40,3 +40,8 @@ class DownloadResult:
 
 	def is_ok(self) -> bool:
 		return isinstance(self.result, DownloadResultOk)
+
+	def get_downloaded_path(self) -> Path:
+		if not self.is_ok():
+			raise ValueError("Failed to download file, can't get path")
+		return self.task.download_file_path

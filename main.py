@@ -16,8 +16,13 @@ from downloader_client.task import DownloadResult, DownloadTask
 from logger import get_logger
 from logger.logger import logger_set_up
 from storage.manager import ModStorageManager
+from zip_extractor.extractor import ZipExtractor
 
 DOWNLOADS_PATH: Path = Path('./downloads')
+EXTRACTIONS_PATH: Path = Path('./extractions')
+CONFIG_FILE: Path = Path('./config.json')
+STORAGE_FILE: Path = Path('./storage.json')
+
 BONELAB_NAME_ID: str = 'bonelab'
 PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
 
@@ -95,6 +100,14 @@ def main() -> None:
 		api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token
 	)
 
+	appdata: str = os.getenv('APPDATA')
+	appdata_path: Path = Path(appdata)
+	mods_folder: Path = appdata_path.parent / 'LocalLow' / 'Stress Level Zero' / 'BONELAB' / 'Mods'
+	if not mods_folder.is_dir():
+		error_msg: str = f"Mods folder does not exist: {mods_folder}"
+		raise Exception(error_msg)
+	logger.info(f"Resolved mods folder to: {mods_folder}")
+
 	bonelab_game: Game = get_game_by_name_id(client, BONELAB_NAME_ID)
 	logger.debug(f"Got target game: {bonelab_game}")
 
@@ -128,6 +141,31 @@ def main() -> None:
 
 	logger.info(f"Updating storage manager with correct results")
 	storage_manager.update_storage(results_ok)
+
+	mod_file_paths: list[Path] = list(map(DownloadResult.get_downloaded_path, results_ok))
+
+	logger.info(f"Extracting {len(mod_file_paths)} file(s)")
+	logger.debug(f"Files to extract: {mod_file_paths}")
+
+	extractor: ZipExtractor = ZipExtractor(EXTRACTIONS_PATH, mods_folder)
+
+	installed_ok: list[tuple[Path, Path]] = []
+	installed_error: list[Path] = []
+
+	for mod_file_path in mod_file_paths:
+		installation_path: Path | None = extractor.extract_and_install(mod_file_path)
+		if installation_path is not None:
+			installed_ok.append((mod_file_path, installation_path))
+		else:
+			installed_error.append(mod_file_path)
+
+	if installed_ok:
+		logger.info(f"Installed {len(installed_ok)} mod(s)")
+		logger.debug(f"Installed mods are: {installed_ok}")
+
+	if installed_error:
+		logger.warning(f"Failed to install {len(installed_error)} mod(s)")
+		logger.debug(f"Failed to install mods are: {installed_error}")
 
 	logger.info(f"Closing...")
 
