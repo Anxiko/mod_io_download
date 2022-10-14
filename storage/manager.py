@@ -121,3 +121,7 @@ class ModStorageManager:
 			StoredModFile.get_as_path,
 			mods_dict.values()
 		))
+
+	def downloaded_mod_file_id(self, game_name_id: str, mod_name_id: str) -> int | None:
+		maybe_stored_mod_file: StoredModFile | None = self._get_mod(game_name_id, mod_name_id)
+		return maybe_stored_mod_file.mod_file_id if maybe_stored_mod_file is not None else None

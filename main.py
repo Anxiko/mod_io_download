@@ -54,15 +54,6 @@ def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 	)
 
 
-def filter_necessary_downloads(
-		storage_manager: ModStorageManager, download_tasks: list[DownloadTask]
-) -> list[DownloadTask]:
-	return list(filter(
-		storage_manager.needs_download,
-		download_tasks
-	))
-
-
 def download_mods(download_tasks: list[DownloadTask]) -> list[DownloadResult]:
 	downloader_client: DownloaderClient = DownloaderClient(download_tasks)
 	results: list[DownloadResult] = asyncio.run(downloader_client.download())
@@ -93,6 +84,19 @@ def split_download_results(
 	return downloads_ok, downloads_error
 
 
+def filter_not_downloaded_mods(game: Game, mods: list[Mod], storage: ModStorageManager) -> list[Mod]:
+	def mod_need_download(mod: Mod) -> bool:
+		latest_mod_file_id: int = mod.get_platform(PLATFORM).modfile_live
+		downloaded_mod_file_id: int | None = storage.downloaded_mod_file_id(game.name_id, mod.name_id)
+
+		return latest_mod_file_id != downloaded_mod_file_id
+
+	return list(filter(
+		mod_need_download,
+		mods
+	))
+
+
 def main() -> None:
 	logger.info("Starting...")
 	config: Config = Config.from_file()
@@ -118,16 +122,17 @@ def main() -> None:
 	logger.debug(f"{my_mods=}")
 
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
+	logger.info(f"Verified downloads integrity")
 
-	download_tasks: list[DownloadTask] = list(map(partial(to_download_task, client, bonelab_game), my_mods))
+	mods_need_download: list[Mod] = filter_not_downloaded_mods(bonelab_game, my_mods, storage_manager)
+	logger.info(f"{len(mods_need_download)} mod(s) to download")
+	logger.debug(f"Mods to download: {mods_need_download}")
+
+	download_tasks: list[DownloadTask] = list(map(partial(to_download_task, client, bonelab_game), mods_need_download))
 	logger.info(f"Generated {len(download_tasks)} download task(s)")
 	logger.debug(f"{download_tasks=}")
 
-	filtered_download_tasks: list[DownloadTask] = filter_necessary_downloads(storage_manager, download_tasks)
-	logger.info(f"Filtered needed downloads to {len(filtered_download_tasks)}")
-	logger.debug(f"{filtered_download_tasks=}")
-
-	results: list[DownloadResult] = download_mods(filtered_download_tasks)
+	results: list[DownloadResult] = download_mods(download_tasks)
 	logger.info(f"Generated {len(results)} result(s)")
 	logger.debug(f"{results=}")
 
