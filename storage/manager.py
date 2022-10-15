@@ -51,7 +51,7 @@ class ModStorageManager:
 		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
 		if mod is None:
 			return True
-		return not mod.has_mod_file_downloaded(mod_file_id)
+		return not mod.has_mod_file_installed(mod_file_id) and not mod.has_mod_file_downloaded(mod_file_id)
 
 	def update_downloaded_mods(self, download_results: Iterable[DownloadResult]) -> None:
 		for download_result in download_results:
