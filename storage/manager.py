@@ -112,7 +112,7 @@ class ModStorageManager:
 		self._save_to_file()
 
 	def _save_to_file(self) -> None:
-		as_json: str = self._storage.json()
+		as_json: str = self._storage.json(indent='\t', ensure_ascii=False)
 		with open(self._FILE_PATH, mode='w', encoding='utf8') as f:
 			f.write(as_json)
 
