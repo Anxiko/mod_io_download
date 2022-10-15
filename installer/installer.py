@@ -16,6 +16,7 @@ class ModInstallerException(Exception):
 	reason: InstallationResultFailReason
 
 	def __init__(self, reason: InstallationResultFailReason):
+		self.reason = reason
 		super().__init__(f"Failed to extract and install mod: {reason}")
 
 
