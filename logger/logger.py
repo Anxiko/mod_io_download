@@ -43,5 +43,5 @@ def logger_set_up() -> None:
 
 	root_logger.addHandler(stdout_handler)
 
-	if os.getenv("MODIO_LOG_TO_FILE") == 1:
+	if os.getenv("MODIO_LOG_TO_FILE"):
 		root_logger.addHandler(file_handler)
