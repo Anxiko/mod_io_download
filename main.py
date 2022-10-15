@@ -18,6 +18,7 @@ from logger import get_logger
 from logger.logger import logger_set_up
 from storage.manager import ModStorageManager
 from utils.containers import binary_partition
+from utils.files import nuke_path
 
 DOWNLOADS_PATH: Path = Path('./downloads')
 EXTRACTIONS_PATH: Path = Path('./extractions')
@@ -164,6 +165,9 @@ def main() -> None:
 
 	logger.info("Updating store manager with installed mods")
 	storage_manager.update_installed_mods(installed_ok)
+
+	logger.info(f"Removing extractions directory, {EXTRACTIONS_PATH}")
+	nuke_path(EXTRACTIONS_PATH)
 
 	logger.info(f"Closing...")
 

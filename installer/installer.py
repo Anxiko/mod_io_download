@@ -8,6 +8,7 @@ from zipfile import ZipFile
 import logger
 from installer.task import InstallationResult, InstallationResultFailReason, InstallationTask
 from utils.containers import flatten_iterable
+from utils.files import nuke_path
 
 logger: Logger = logger.get_logger(__name__)
 
@@ -31,23 +32,11 @@ class ModInstaller:
 		self._extractions_path = extractions_path
 		self._installations_path = installations_path
 
-	@staticmethod
-	def _nuke(p: Path) -> None:
-		if not p.exists():
-			return
-
-		if p.is_dir():
-			shutil.rmtree(p)
-		elif p.is_file():
-			os.remove(p)
-		else:
-			raise TypeError(f"Can't remove {p}: is not a file or directory")
-
 	def _get_path_for_mod_extraction(self, mod_file) -> Path:
 		name_without_extension: str = mod_file.stem
 		target_path: Path = self._extractions_path / name_without_extension
 
-		self._nuke(target_path)
+		nuke_path(target_path)
 		os.makedirs(target_path)
 		return target_path
 
@@ -106,7 +95,7 @@ class ModInstaller:
 	@classmethod
 	def _copy_to_mods_dir(cls, content: Path, mods_dir: Path) -> Path:
 		result_dir: Path = mods_dir / content.name
-		cls._nuke(result_dir)
+		nuke_path(result_dir)
 		shutil.copytree(content, result_dir)
 		return result_dir
 
