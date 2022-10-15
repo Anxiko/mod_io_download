@@ -88,6 +88,12 @@ def install_downloaded_mods(
 	return list(map(installer.extract_and_install, installation_tasks))
 
 
+def uninstalled_unsubscribed_mods(
+		manager: ModStorageManager, game: Game, subscribed_mods: list[Mod]
+) -> set[str]:
+	return manager.remove_unsubscribed_mods(game.name_id, subscribed_mods)
+
+
 def main() -> None:
 	logger.info("Starting...")
 	config: Config = Config.from_file()
@@ -165,6 +171,10 @@ def main() -> None:
 
 	logger.info("Updating store manager with installed mods")
 	storage_manager.update_installed_mods(installed_ok)
+
+	uninstalled_mods: set[str] = uninstalled_unsubscribed_mods(storage_manager, bonelab_game, my_mods)
+	logger.info(f"Uninstalled {len(uninstalled_mods)} mod(s)")
+	logger.debug(f"Uninstalled mods are: {uninstalled_mods}")
 
 	logger.info(f"Removing extractions directory, {EXTRACTIONS_PATH}")
 	nuke_path(EXTRACTIONS_PATH)

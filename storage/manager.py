@@ -1,4 +1,5 @@
 import hashlib
+from logging import Logger
 from os import PathLike
 from pathlib import Path
 from typing import Iterable, TypeVar
@@ -8,7 +9,11 @@ from api_client.models.mod import Mod
 from api_client.models.platform import TargetPlatform
 from downloader_client.task import DownloadResult
 from installer.task import InstallationResult, InstallationTask
+from utils.files import nuke_path
 from .models import DownloadedManagedMod, InstalledManagedMod, ManagedMod, Storage
+import logger
+
+logger: Logger = logger.get_logger(__name__)
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -142,6 +147,33 @@ class ModStorageManager:
 
 			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
 		self._save_to_file()
+
+	def remove_unsubscribed_mods(
+			self, game_name_id: str, mod_subscriptions: list[Mod]
+	) -> set[str]:
+		try:
+			managed_mods_dict: dict[str, ManagedMod] = self._storage.get_managed_mods_for_game(game_name_id)
+		except KeyError:
+			logger.warning(f"Could not find any managed mod for {game_name_id}")
+			return set()
+
+		mods_subscription_set: set[str] = {m.name_id for m in mod_subscriptions}
+		managed_mods_set: set[str] = set(managed_mods_dict.keys())
+
+		managed_unsubscribed_mod_set: set[str] = managed_mods_set - mods_subscription_set
+		for managed_unsubscribed_mod in managed_unsubscribed_mod_set:
+			managed_mod: ManagedMod = managed_mods_dict[managed_unsubscribed_mod]
+			self._remove_managed_mod_files(managed_mod)
+			del managed_mods_dict[managed_unsubscribed_mod]
+
+		self._storage.replace_managed_mods(game_name_id, managed_mods_dict)
+		return managed_unsubscribed_mod_set
+
+	@staticmethod
+	def _remove_managed_mod_files(managed_mod: ManagedMod) -> None:
+		for installed_path in managed_mod.installed_mod.installed_paths:
+			nuke_path(installed_path)
+		nuke_path(managed_mod.downloaded_mod.file_path)
 
 	def _save_to_file(self) -> None:
 		as_json: str = self._storage.json(indent='\t', ensure_ascii=False)

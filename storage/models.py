@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pydantic
@@ -38,6 +39,12 @@ class ManagedMod(pydantic.BaseModel):
 
 class Storage(pydantic.BaseModel):
 	games: dict[StrictStr, dict[StrictStr, ManagedMod]] = Field(default_factory=dict)
+
+	def replace_managed_mods(self, game_name_id: str, managed_mods: dict[str, ManagedMod]) -> None:
+		self.games[game_name_id] = managed_mods
+
+	def get_managed_mods_for_game(self, game_name_id: str) -> dict[str, ManagedMod]:
+		return self.games[game_name_id]
 
 	def read_managed_mod(self, game_name_id: str, mod_name_id: str) -> ManagedMod | None:
 		try:
