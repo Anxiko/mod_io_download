@@ -3,15 +3,23 @@ import shutil
 from functools import partial
 from logging import Logger
 from pathlib import Path
-from typing import Iterable
 from zipfile import ZipFile
 
 import logger
+from installer.task import InstallationResult, InstallationResultFailReason, InstallationTask
+from utils.containers import flatten_iterable
 
 logger: Logger = logger.get_logger(__name__)
 
 
-class ZipExtractor:
+class ModInstallerException(Exception):
+	reason: InstallationResultFailReason
+
+	def __init__(self, reason: InstallationResultFailReason):
+		super().__init__(f"Failed to extract and install mod: {reason}")
+
+
+class ModInstaller:
 	_PALLET_FILE: str = "pallet.json"
 	_PLATFORM_KEYWORDS: str = ['win', 'pc']
 
@@ -42,20 +50,12 @@ class ZipExtractor:
 		os.makedirs(target_path)
 		return target_path
 
-	@staticmethod
-	def _flatten_lists(lists: Iterable[Iterable[Path]]) -> list[Path]:
-		return [
-			p
-			for l in lists
-			for p in l
-		]
-
 	def _locate_possible_content_folders(self, p: Path) -> list[Path]:
 		maybe_pallet: Path = p / self._PALLET_FILE
 		if maybe_pallet.is_file():
 			return [p]
 
-		return self._flatten_lists(
+		return flatten_iterable(
 			map(
 				self._locate_possible_content_folders,
 				filter(Path.is_dir, p.iterdir())
@@ -66,7 +66,7 @@ class ZipExtractor:
 		rel_path: str = str(p.relative_to(root)).lower()
 		return any(keyword in rel_path for keyword in self._PLATFORM_KEYWORDS)
 
-	def _get_selected_content_folder(self, extraction_path: Path) -> Path | None:
+	def _get_selected_content_folder(self, extraction_path: Path) -> Path:
 		possible_content_folders: list[Path] = self._locate_possible_content_folders(extraction_path)
 
 		if len(possible_content_folders) == 1:
@@ -74,7 +74,7 @@ class ZipExtractor:
 
 		if len(possible_content_folders) == 0:
 			logger.warning(f"Could not locate {self._PALLET_FILE} in {extraction_path}")
-			return None
+			raise ModInstallerException(InstallationResultFailReason.NO_PALLET_FOUND)
 
 		platform_keyword_content_folders: list[Path] = list(
 			filter(partial(self._has_platform_keyword, extraction_path), possible_content_folders))
@@ -85,7 +85,7 @@ class ZipExtractor:
 				f" but could not find platform keywords {self._PLATFORM_KEYWORDS}"
 				f" in any of them."
 			)
-			return None
+			raise ModInstallerException(InstallationResultFailReason.NO_FILTERED_PALLET_FOUND)
 
 		if len(platform_keyword_content_folders) == 1:
 			return platform_keyword_content_folders[0]
@@ -95,7 +95,7 @@ class ZipExtractor:
 			f" and found the platform keywords {self._PLATFORM_KEYWORDS}"
 			f" in too many of them: {platform_keyword_content_folders}"
 		)
-		return None
+		raise ModInstallerException(InstallationResultFailReason.TOO_MANY_FILTERED_PALLETS_FOUND)
 
 	@staticmethod
 	def _extract_zip(zip_path: Path, output_path: Path) -> None:
@@ -118,14 +118,14 @@ class ZipExtractor:
 		self._extract_zip(mod_file, target_path)
 		return target_path
 
-	def _install_mod(self, extracted_path: Path) -> Path | None:
-		content_path: Path | None = self._get_selected_content_folder(extracted_path)
-		if content_path is None:
-			return None
+	def _install_mod(self, extracted_path: Path) -> list[Path]:
+		content_path: Path = self._get_selected_content_folder(extracted_path)
+		return [self._copy_to_mods_dir(content_path, self._installations_path)]
 
-		return self._copy_to_mods_dir(content_path, self._installations_path)
-
-	def extract_and_install(self, mod_file: Path) -> Path | None:
-		extracted_path: Path = self._extract_mod(mod_file)
-		installation_path: Path | None = self._install_mod(extracted_path)
-		return installation_path
+	def extract_and_install(self, installation_task: InstallationTask) -> InstallationResult:
+		try:
+			extracted_path: Path = self._extract_mod(installation_task.downloaded_path)
+			installation_paths: list[Path] = self._install_mod(extracted_path)
+			InstallationResult.create_ok(installation_task, installation_paths)
+		except ModInstallerException as e:
+			return InstallationResult.create_error(installation_task, e.reason)

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 from functools import partial
 from logging import Logger
@@ -13,10 +12,12 @@ from api_client.models.platform import TargetPlatform
 from config import Config
 from downloader_client.client import DownloaderClient
 from downloader_client.task import DownloadResult, DownloadTask
+from installer.installer import ModInstaller
+from installer.task import InstallationResult, InstallationTask
 from logger import get_logger
 from logger.logger import logger_set_up
 from storage.manager import ModStorageManager
-from zip_extractor.extractor import ZipExtractor
+from utils.containers import binary_partition
 
 DOWNLOADS_PATH: Path = Path('./downloads')
 EXTRACTIONS_PATH: Path = Path('./extractions')
@@ -69,21 +70,6 @@ def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	return games[0]
 
 
-def split_download_results(
-		download_results: list[DownloadResult]
-) -> tuple[list[DownloadResult], list[DownloadResult]]:
-	downloads_ok: list[DownloadResult] = []
-	downloads_error: list[DownloadResult] = []
-
-	for download_result in download_results:
-		if download_result.is_ok():
-			downloads_ok.append(download_result)
-		else:
-			downloads_error.append(download_result)
-
-	return downloads_ok, downloads_error
-
-
 def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageManager) -> list[Mod]:
 	def mod_need_download(mod: Mod) -> bool:
 		latest_mod_file_id: int = mod.get_platform(PLATFORM).modfile_live
@@ -93,6 +79,21 @@ def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageMa
 		mod_need_download,
 		mods
 	))
+
+
+def generate_installation_task(download_result_ok: DownloadResult) -> InstallationTask:
+	return InstallationTask(
+		downloaded_path=download_result_ok.get_downloaded_path(),
+		game=download_result_ok.task.game,
+		mod=download_result_ok.task.mod,
+		mod_file=download_result_ok.task.mod_file
+	)
+
+
+def install_downloaded_mods(
+		installer: ModInstaller, installation_tasks: list[InstallationTask]
+) -> list[InstallationResult]:
+	return list(map(installer.extract_and_install, installation_tasks))
 
 
 def main() -> None:
@@ -130,37 +131,35 @@ def main() -> None:
 	logger.info(f"Generated {len(download_tasks)} download task(s)")
 	logger.debug(f"{download_tasks=}")
 
-	results: list[DownloadResult] = download_mods(download_tasks)
-	logger.info(f"Generated {len(results)} result(s)")
-	logger.debug(f"{results=}")
+	download_results: list[DownloadResult] = download_mods(download_tasks)
+	logger.info(f"Generated {len(download_results)} result(s)")
+	logger.debug(f"{download_results=}")
 
-	results_ok, results_error = split_download_results(results)
-	if results_ok:
-		logger.info(f"{len(results_ok)} download(s) OK")
-	if results_error:
-		logger.warning(f"{len(results_error)} download(s) failed")
-		for result_error in results_error:
-			logger.debug(result_error)
+	download_results_ok: list[DownloadResult]
+	download_results_error: list[DownloadResult]
 
-	logger.info(f"Updating storage manager with correct results")
-	storage_manager.update_downloaded_mods(results_ok)
+	download_results_ok, download_results_error = binary_partition(download_results, DownloadResult.is_ok)
+	if download_results_ok:
+		logger.info(f"{len(download_results_ok)} download(s) OK")
+	if download_results_error:
+		logger.warning(f"{len(download_results_error)} download(s) failed")
+		logger.debug(f"Failed to download: {download_results_error}")
 
-	mod_file_paths: list[Path] = list(map(DownloadResult.get_downloaded_path, results_ok))
+	logger.info(f"Updating storage manager with downloaded mods")
+	storage_manager.update_downloaded_mods(download_results_ok)
 
-	logger.info(f"Extracting {len(mod_file_paths)} file(s)")
-	logger.debug(f"Files to extract: {mod_file_paths}")
+	installation_tasks: list[InstallationTask] = list(map(generate_installation_task, download_results_ok))
 
-	extractor: ZipExtractor = ZipExtractor(EXTRACTIONS_PATH, mods_folder)
+	logger.info(f"Extracting {len(installation_tasks)} file(s)")
+	logger.debug(f"Files to extract: {installation_tasks}")
 
-	installed_ok: list[tuple[Path, Path]] = []
-	installed_error: list[Path] = []
+	installer: ModInstaller = ModInstaller(EXTRACTIONS_PATH, mods_folder)
+	installation_results: list[InstallationResult] = install_downloaded_mods(installer, installation_tasks)
 
-	for mod_file_path in mod_file_paths:
-		installation_path: Path | None = extractor.extract_and_install(mod_file_path)
-		if installation_path is not None:
-			installed_ok.append((mod_file_path, installation_path))
-		else:
-			installed_error.append(mod_file_path)
+	installed_ok: list[InstallationResult]
+	installed_error: list[InstallationResult]
+
+	installed_ok, installed_error = binary_partition(installation_results, InstallationResult.is_ok)
 
 	if installed_ok:
 		logger.info(f"Installed {len(installed_ok)} mod(s)")
@@ -169,6 +168,9 @@ def main() -> None:
 	if installed_error:
 		logger.warning(f"Failed to install {len(installed_error)} mod(s)")
 		logger.debug(f"Failed to install mods are: {installed_error}")
+
+	logger.info("Updating store manager with installed mods")
+	storage_manager.update_installed_mods(installed_ok)
 
 	logger.info(f"Closing...")
 

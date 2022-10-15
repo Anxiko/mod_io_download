@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Iterable, TypeVar
 
 from downloader_client.task import DownloadResult
+from installer.task import InstallationResult
 from .models import DownloadedManagedMod, InstalledManagedMod, ManagedMod, Storage
 
 K = TypeVar('K')
@@ -15,11 +16,13 @@ class StorageException(Exception):
 
 
 class StorageUpdateException(StorageException):
-	download_result: DownloadResult
+	@classmethod
+	def for_download_update(cls, download_result: DownloadResult) -> 'StorageUpdateException':
+		return cls(f"Can't update the storage state with a failed download: {download_result}")
 
-	def __init__(self, download_result: DownloadResult):
-		self.download_result = download_result
-		super().__init__(f"Can't upload the storage state with a failed download: {self.download_result}")
+	@classmethod
+	def for_installation_update(cls, installation_result: InstallationResult) -> 'StorageUpdateException':
+		return cls(f"Can't update the storage state with a failed installation: {installation_result}")
 
 
 class ModStorageManager:
@@ -40,6 +43,73 @@ class ModStorageManager:
 			storage: Storage = Storage.parse_file(cls._FILE_PATH)
 			return cls(storage)
 		return cls(Storage())
+
+	def needs_download(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
+		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+		if mod is None:
+			return True
+		return not mod.has_mod_file_downloaded(mod_file_id)
+
+	def update_downloaded_mods(self, download_results: Iterable[DownloadResult]) -> None:
+		for download_result in download_results:
+			if not download_result.is_ok():
+				raise StorageUpdateException.for_download_update(download_result)
+
+			game_name_id: str = download_result.task.game.name_id
+			mod_name_id: str = download_result.task.mod.name_id
+
+			mod_file_id: int = download_result.task.mod_file.id
+			file_path: Path = download_result.task.download_file_path
+			file_hash: str = self._hash_md5(download_result.task.download_file_path)
+
+			downloaded_managed_mod: DownloadedManagedMod = DownloadedManagedMod(
+				mod_file_id=mod_file_id,
+				file_path=file_path,
+				file_hash=file_hash
+			)
+
+			maybe_managed_mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+			if maybe_managed_mod is None:
+				maybe_managed_mod = ManagedMod(downloaded_mod=downloaded_managed_mod)
+			else:
+				maybe_managed_mod.downloaded_mod = downloaded_managed_mod
+
+			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
+		self._save_to_file()
+
+	def needs_installation(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
+		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+		if mod is None:
+			return False
+
+		return not mod.has_mod_file_installed(mod_file_id)
+
+	def update_installed_mods(self, installation_results: Iterable[InstallationResult]) -> None:
+		for installation_result in installation_results:
+			if not installation_result.is_ok():
+				raise StorageUpdateException.for_installation_update(installation_result)
+
+			game_name_id: str = installation_result.task.game.name_id
+			mod_name_id: str = installation_result.task.mod.name_id
+
+			mod_file_id: int = installation_result.task.mod_file.id
+			installed_paths: list[Path] = installation_result.result.installed_paths
+
+			installed_managed_mod: InstalledManagedMod = InstalledManagedMod(
+				mod_file_id=mod_file_id,
+				installed_paths=installed_paths
+			)
+
+			maybe_managed_mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+			if maybe_managed_mod is None:
+				raise ValueError(
+					f"Attempted to update mod installation for {game_name_id}, {mod_name_id} that doesn't exist"
+				)
+			else:
+				maybe_managed_mod.installed_mod = installed_managed_mod
+
+			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
+		self._save_to_file()
 
 	def _save_to_file(self) -> None:
 		as_json: str = self._storage.json()
@@ -112,36 +182,3 @@ class ModStorageManager:
 			return self._storage.games[game_name_id][mod_name_id]
 		except KeyError:
 			return None
-
-	def update_downloaded_mods(self, download_results: Iterable[DownloadResult]) -> None:
-		for download_result in download_results:
-			if not download_result.is_ok():
-				raise StorageUpdateException(download_result)
-
-			game_name_id: str = download_result.task.game.name_id
-			mod_name_id: str = download_result.task.mod.name_id
-
-			mod_file_id: int = download_result.task.mod_file.id
-			file_path: Path = download_result.task.download_file_path
-			file_hash: str = self._hash_md5(download_result.task.download_file_path)
-
-			downloaded_managed_mod: DownloadedManagedMod = DownloadedManagedMod(
-				mod_file_id=mod_file_id,
-				file_path=file_path,
-				file_hash=file_hash
-			)
-
-			maybe_managed_mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
-			if maybe_managed_mod is None:
-				maybe_managed_mod = ManagedMod(downloaded_mod=downloaded_managed_mod)
-			else:
-				maybe_managed_mod.downloaded_mod = downloaded_managed_mod
-
-			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
-		self._save_to_file()
-
-	def needs_download(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
-		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
-		if mod is None:
-			return True
-		return not mod.has_mod_file_downloaded(mod_file_id)

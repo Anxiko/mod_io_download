@@ -1,3 +1,4 @@
+from itertools import filterfalse
 from pathlib import Path
 
 import pydantic
@@ -14,6 +15,9 @@ class InstalledManagedMod(pydantic.BaseModel):
 	mod_file_id: StrictInt
 	installed_paths: list[Path]
 
+	def all_paths_present(self) -> bool:
+		return all(map(Path.is_dir, self.installed_paths))
+
 
 class ManagedMod(pydantic.BaseModel):
 	downloaded_mod: DownloadedManagedMod | None = Field(None)
@@ -24,6 +28,13 @@ class ManagedMod(pydantic.BaseModel):
 
 	def has_mod_file_downloaded(self, requested_mod_file_id: int) -> bool:
 		return self.downloaded_mod is not None and self.downloaded_mod.mod_file_id == requested_mod_file_id
+
+	def has_mod_file_installed(self, requested_mod_file_id: int) -> bool:
+		return (
+				self.installed_mod is not None
+				and self.installed_mod.mod_file_id == requested_mod_file_id
+				and self.installed_mod.all_paths_present()
+		)
 
 
 class Storage(pydantic.BaseModel):
