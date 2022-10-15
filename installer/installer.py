@@ -7,7 +7,7 @@ from zipfile import ZipFile
 
 import logger
 from installer.task import InstallationResult, InstallationResultFailReason, InstallationTask
-from utils.containers import flatten_iterable
+from utils.containers import binary_partition, flatten_iterable
 from utils.files import nuke_path
 
 logger: Logger = logger.get_logger(__name__)
@@ -23,7 +23,8 @@ class ModInstallerException(Exception):
 
 class ModInstaller:
 	_PALLET_FILE: str = "pallet.json"
-	_PLATFORM_KEYWORDS: str = ['win', 'pc']
+	_PLATFORM_KEYWORDS: list[str] = ['win', 'pc']
+	_BANNED_PLATFORM_KEYWORDS: list[str] = ['quest', 'oculus', 'android']
 
 	_extractions_path: Path
 	_installations_path: Path
@@ -52,40 +53,48 @@ class ModInstaller:
 			)
 		)
 
-	def _has_platform_keyword(self, root: Path, p: Path) -> bool:
-		rel_path: str = str(p.relative_to(root)).lower()
-		return any(keyword in rel_path for keyword in self._PLATFORM_KEYWORDS)
+	@staticmethod
+	def _contains_keyword(s: str, keywords: list[str]) -> bool:
+		return any(keyword in s.lower() for keyword in keywords)
 
-	def _get_selected_content_folder(self, extraction_path: Path) -> Path:
+	@classmethod
+	def _attempt_platform_partition(cls, root: Path, paths: list[Path]) -> tuple[list[Path], list[Path]] | None:
+		def predicate(p: Path) -> bool:
+			rel_path: str = str(p.relative_to(root))
+			if cls._contains_keyword(rel_path, cls._PLATFORM_KEYWORDS):
+				return True
+			elif cls._contains_keyword(rel_path, cls._BANNED_PLATFORM_KEYWORDS):
+				return False
+			raise ValueError(f"Path {p} did not contain any platform keyword")
+
+		return binary_partition(paths, predicate)
+
+	def _get_selected_content_folders(self, extraction_path: Path) -> list[Path]:
 		possible_content_folders: list[Path] = self._locate_possible_content_folders(extraction_path)
 
 		if len(possible_content_folders) == 1:
-			return possible_content_folders[0]
+			return possible_content_folders
 
 		if len(possible_content_folders) == 0:
 			logger.warning(f"Could not locate {self._PALLET_FILE} in {extraction_path}")
 			raise ModInstallerException(InstallationResultFailReason.NO_PALLET_FOUND)
 
-		platform_keyword_content_folders: list[Path] = list(
-			filter(partial(self._has_platform_keyword, extraction_path), possible_content_folders))
-
-		if len(platform_keyword_content_folders) == 0:
-			logger.warning(
-				f"Found too many content folders {possible_content_folders},"
-				f" but could not find platform keywords {self._PLATFORM_KEYWORDS}"
-				f" in any of them."
+		try:
+			accepted_content_folders: list[Path]
+			ignored_content_folders: list[Path]
+			accepted_content_folders, ignored_content_folders = self._attempt_platform_partition(
+				extraction_path, possible_content_folders
 			)
-			raise ModInstallerException(InstallationResultFailReason.NO_FILTERED_PALLET_FOUND)
+			logger.debug(f"Partitioned content folders accepted: {accepted_content_folders=}")
+			logger.debug(f"Partitioned content folders ignored: {accepted_content_folders=}")
 
-		if len(platform_keyword_content_folders) == 1:
-			return platform_keyword_content_folders[0]
+			return accepted_content_folders
+		except ValueError:
+			pass
 
-		logger.warning(
-			f"Found too many content folders {possible_content_folders},"
-			f" and found the platform keywords {self._PLATFORM_KEYWORDS}"
-			f" in too many of them: {platform_keyword_content_folders}"
-		)
-		raise ModInstallerException(InstallationResultFailReason.TOO_MANY_FILTERED_PALLETS_FOUND)
+		logger.warning(f"Couldn't partition content folders for {extraction_path}, accepting all")
+		logger.debug(f"Accepted content folders for {extraction_path} are: {possible_content_folders}")
+		return possible_content_folders
 
 	@staticmethod
 	def _extract_zip(zip_path: Path, output_path: Path) -> None:
@@ -109,8 +118,11 @@ class ModInstaller:
 		return target_path
 
 	def _install_mod(self, extracted_path: Path) -> list[Path]:
-		content_path: Path = self._get_selected_content_folder(extracted_path)
-		return [self._copy_to_mods_dir(content_path, self._installations_path)]
+		content_paths: list[Path] = self._get_selected_content_folders(extracted_path)
+		return list(map(
+			lambda p: self._copy_to_mods_dir(p, self._installations_path),
+			content_paths
+		))
 
 	def extract_and_install(self, installation_task: InstallationTask) -> InstallationResult:
 		try:
