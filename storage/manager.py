@@ -89,10 +89,10 @@ class ModStorageManager:
 			if not installation_result.is_ok():
 				raise StorageUpdateException.for_installation_update(installation_result)
 
-			game_name_id: str = installation_result.task.game.name_id
-			mod_name_id: str = installation_result.task.mod.name_id
+			game_name_id: str = installation_result.task.game_name_id
+			mod_name_id: str = installation_result.task.mod_name_id
 
-			mod_file_id: int = installation_result.task.mod_file.id
+			mod_file_id: int = installation_result.task.mod_file_id
 			installed_paths: list[Path] = installation_result.result.installed_paths
 
 			installed_managed_mod: InstalledManagedMod = InstalledManagedMod(

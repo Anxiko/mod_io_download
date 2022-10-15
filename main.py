@@ -84,9 +84,9 @@ def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageMa
 def generate_installation_task(download_result_ok: DownloadResult) -> InstallationTask:
 	return InstallationTask(
 		downloaded_path=download_result_ok.get_downloaded_path(),
-		game=download_result_ok.task.game,
-		mod=download_result_ok.task.mod,
-		mod_file=download_result_ok.task.mod_file
+		game_name_id=download_result_ok.task.game.name_id,
+		mod_name_id=download_result_ok.task.mod.name_id,
+		mod_file_id=download_result_ok.task.mod_file.id
 	)
 
 

@@ -127,6 +127,6 @@ class ModInstaller:
 		try:
 			extracted_path: Path = self._extract_mod(installation_task.downloaded_path)
 			installation_paths: list[Path] = self._install_mod(extracted_path)
-			InstallationResult.create_ok(installation_task, installation_paths)
+			return InstallationResult.create_ok(installation_task, installation_paths)
 		except ModInstallerException as e:
 			return InstallationResult.create_error(installation_task, e.reason)

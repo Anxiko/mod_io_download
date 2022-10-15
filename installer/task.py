@@ -2,17 +2,13 @@ import enum
 from dataclasses import dataclass
 from pathlib import Path
 
-from api_client.models.game import Game
-from api_client.models.mod import Mod
-from api_client.models.mod_file import ModFile
-
 
 @dataclass
 class InstallationTask:
 	downloaded_path: Path
-	game: Game
-	mod: Mod
-	mod_file: ModFile
+	game_name_id: str
+	mod_name_id: str
+	mod_file_id: int
 
 
 class InstallationResultFailReason(enum.Enum):
