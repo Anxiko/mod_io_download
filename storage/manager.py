@@ -3,8 +3,8 @@ from os import PathLike
 from pathlib import Path
 from typing import Iterable, TypeVar
 
-from downloader_client.task import DownloadResult, DownloadTask
-from .models import Storage, StoredModFile
+from downloader_client.task import DownloadResult
+from .models import DownloadedManagedMod, InstalledManagedMod, ManagedMod, Storage
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -54,42 +54,66 @@ class ModStorageManager:
 				hasher.update(chunk)
 		return hasher.hexdigest()
 
-	def _entry_is_valid(self, _game_name_id: str, _mod_name_id: str, stored_mod_file: StoredModFile) -> bool:
-		try:
-			file_path: Path = Path(stored_mod_file.file_path)
-		except Exception:
-			return False
+	@classmethod
+	def _verify_downloaded_mod(cls, downloaded_mod: DownloadedManagedMod | None) -> DownloadedManagedMod | None:
+		if downloaded_mod is None:
+			return None
 
-		if not file_path.is_file():
-			return False
+		downloaded_file_path: Path = downloaded_mod.file_path
+		if not downloaded_file_path.is_file():
+			return None
 
-		calculated_hash: str = self._hash_md5(file_path)
-		return stored_mod_file.file_hash == calculated_hash
+		calculated_hash: str = cls._hash_md5(downloaded_file_path)
+		if calculated_hash == downloaded_mod.file_hash:
+			return downloaded_mod
+		return None
+
+	@staticmethod
+	def _verify_installed_mod(installed_mod: InstalledManagedMod | None) -> InstalledManagedMod | None:
+		if installed_mod is None:
+			return None
+
+		verified_installed_paths: list[Path] = list(filter(
+			Path.is_dir,
+			installed_mod.installed_paths
+		))
+
+		return InstalledManagedMod(
+			mod_file_id=installed_mod.mod_file_id,
+			installed_paths=verified_installed_paths
+		)
+
+	def _entry_is_valid(self, _game_name_id: str, _mod_name_id: str, stored_mod_file: ManagedMod) -> bool:
+		verified_downloaded_mod: DownloadedManagedMod | None = self._verify_downloaded_mod(
+			stored_mod_file.downloaded_mod
+		)
+
+		verified_installed_mod: InstalledManagedMod | None = self._verify_installed_mod(
+			stored_mod_file.installed_mod
+		)
+
+		stored_mod_file.downloaded_mod = verified_downloaded_mod
+		stored_mod_file.installed_mod = verified_installed_mod
+
+		return stored_mod_file.contains_info()
 
 	def _validate(self) -> None:
-		validated_games: dict[str, dict[str, StoredModFile]] = {}
+		validated_storage: Storage = Storage()
 
 		for game_name_id, game_mods in self._storage.games.items():
-			validated_game_mods: dict[str, StoredModFile] = validated_games.setdefault(game_name_id, {})
-			for mod_name_id, stored_mod_file in game_mods.items():
-				if self._entry_is_valid(game_name_id, mod_name_id, stored_mod_file):
-					validated_game_mods[mod_name_id] = stored_mod_file
+			for mod_name_id, managed_mod in game_mods.items():
+				if self._entry_is_valid(game_name_id, mod_name_id, managed_mod):
+					validated_storage.write_managed_mod(game_name_id, mod_name_id, managed_mod)
 
-		self._storage = Storage(games=validated_games)
+		self._storage = validated_storage
 
-	def _get_mod(self, game_name_id: str, mod_name_id: str) -> StoredModFile | None:
+	def _get_mod(self, game_name_id: str, mod_name_id: str) -> ManagedMod | None:
 		try:
 			return self._storage.games[game_name_id][mod_name_id]
 		except KeyError:
 			return None
 
-	def needs_download(self, download_task: DownloadTask) -> bool:
-		mod: StoredModFile | None = self._get_mod(download_task.game.name_id, download_task.mod.name_id)
-		if mod is None:
-			return True
-		return mod.mod_file_id != download_task.mod_file.id
-
-	def update_storage(self, download_results: Iterable[DownloadResult]) -> None:
+	def update_downloaded_mods(self, download_results: Iterable[DownloadResult]) -> None:
 		for download_result in download_results:
 			if not download_result.is_ok():
 				raise StorageUpdateException(download_result)
@@ -98,30 +122,26 @@ class ModStorageManager:
 			mod_name_id: str = download_result.task.mod.name_id
 
 			mod_file_id: int = download_result.task.mod_file.id
-			file_path: str = str(download_result.task.download_file_path)
+			file_path: Path = download_result.task.download_file_path
 			file_hash: str = self._hash_md5(download_result.task.download_file_path)
 
-			stored_mod_file: StoredModFile = StoredModFile(
+			downloaded_managed_mod: DownloadedManagedMod = DownloadedManagedMod(
 				mod_file_id=mod_file_id,
 				file_path=file_path,
 				file_hash=file_hash
 			)
 
-			self._storage.games.setdefault(game_name_id, {})[mod_name_id] = stored_mod_file
+			maybe_managed_mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+			if maybe_managed_mod is None:
+				maybe_managed_mod = ManagedMod(downloaded_mod=downloaded_managed_mod)
+			else:
+				maybe_managed_mod.downloaded_mod = downloaded_managed_mod
+
+			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
 		self._save_to_file()
 
-	def list_mod_files(self, game_name_id: str) -> list[Path]:
-		mods_dict: dict[str, StoredModFile]
-		try:
-			mods_dict = self._storage.games[game_name_id]
-		except KeyError:
-			return list()
-
-		return list(map(
-			StoredModFile.get_as_path,
-			mods_dict.values()
-		))
-
-	def downloaded_mod_file_id(self, game_name_id: str, mod_name_id: str) -> int | None:
-		maybe_stored_mod_file: StoredModFile | None = self._get_mod(game_name_id, mod_name_id)
-		return maybe_stored_mod_file.mod_file_id if maybe_stored_mod_file is not None else None
+	def needs_download(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
+		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
+		if mod is None:
+			return True
+		return not mod.has_mod_file_downloaded(mod_file_id)

@@ -84,12 +84,10 @@ def split_download_results(
 	return downloads_ok, downloads_error
 
 
-def filter_not_downloaded_mods(game: Game, mods: list[Mod], storage: ModStorageManager) -> list[Mod]:
+def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageManager) -> list[Mod]:
 	def mod_need_download(mod: Mod) -> bool:
 		latest_mod_file_id: int = mod.get_platform(PLATFORM).modfile_live
-		downloaded_mod_file_id: int | None = storage.downloaded_mod_file_id(game.name_id, mod.name_id)
-
-		return latest_mod_file_id != downloaded_mod_file_id
+		return storage.needs_download(game.name_id, mod.name_id, latest_mod_file_id)
 
 	return list(filter(
 		mod_need_download,
@@ -124,7 +122,7 @@ def main() -> None:
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 	logger.info(f"Verified downloads integrity")
 
-	mods_need_download: list[Mod] = filter_not_downloaded_mods(bonelab_game, my_mods, storage_manager)
+	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
 
@@ -138,14 +136,14 @@ def main() -> None:
 
 	results_ok, results_error = split_download_results(results)
 	if results_ok:
-		logger.info(f"{results_ok} download(s) OK")
+		logger.info(f"{len(results_ok)} download(s) OK")
 	if results_error:
 		logger.warning(f"{len(results_error)} download(s) failed")
 		for result_error in results_error:
 			logger.debug(result_error)
 
 	logger.info(f"Updating storage manager with correct results")
-	storage_manager.update_storage(results_ok)
+	storage_manager.update_downloaded_mods(results_ok)
 
 	mod_file_paths: list[Path] = list(map(DownloadResult.get_downloaded_path, results_ok))
 
