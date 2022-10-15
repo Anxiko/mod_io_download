@@ -3,8 +3,11 @@ from os import PathLike
 from pathlib import Path
 from typing import Iterable, TypeVar
 
+from api_client.models.game import Game
+from api_client.models.mod import Mod
+from api_client.models.platform import TargetPlatform
 from downloader_client.task import DownloadResult
-from installer.task import InstallationResult
+from installer.task import InstallationResult, InstallationTask
 from .models import DownloadedManagedMod, InstalledManagedMod, ManagedMod, Storage
 
 K = TypeVar('K')
@@ -76,6 +79,35 @@ class ModStorageManager:
 
 			self._storage.write_managed_mod(game_name_id, mod_name_id, maybe_managed_mod)
 		self._save_to_file()
+
+	def generate_mod_install_tasks(
+			self, game: Game, mods: list[Mod], platform: TargetPlatform
+	) -> list[InstallationTask]:
+		try:
+			managed_mods_dict: dict[str, ManagedMod] = self._storage.games[game.name_id]
+		except KeyError:
+			return []
+
+		installation_tasks: list[InstallationTask] = []
+		mod: Mod
+		for mod in mods:
+			mod_file_id: int = mod.get_platform(platform).modfile_live
+
+			try:
+				managed_mod: ManagedMod = managed_mods_dict[mod.name_id]
+			except KeyError:
+				continue
+
+			if managed_mod.has_mod_file_downloaded(mod_file_id) and not managed_mod.has_mod_file_installed(mod_file_id):
+				installation_task: InstallationTask = InstallationTask(
+					downloaded_path=managed_mod.downloaded_mod.file_path,
+					game_name_id=game.name_id,
+					mod_name_id=mod.name_id,
+					mod_file_id=mod_file_id
+				)
+				installation_tasks.append(installation_task)
+
+		return installation_tasks
 
 	def needs_installation(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
 		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)

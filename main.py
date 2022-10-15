@@ -81,15 +81,6 @@ def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageMa
 	))
 
 
-def generate_installation_task(download_result_ok: DownloadResult) -> InstallationTask:
-	return InstallationTask(
-		downloaded_path=download_result_ok.get_downloaded_path(),
-		game_name_id=download_result_ok.task.game.name_id,
-		mod_name_id=download_result_ok.task.mod.name_id,
-		mod_file_id=download_result_ok.task.mod_file.id
-	)
-
-
 def install_downloaded_mods(
 		installer: ModInstaller, installation_tasks: list[InstallationTask]
 ) -> list[InstallationResult]:
@@ -148,9 +139,11 @@ def main() -> None:
 	logger.info(f"Updating storage manager with downloaded mods")
 	storage_manager.update_downloaded_mods(download_results_ok)
 
-	installation_tasks: list[InstallationTask] = list(map(generate_installation_task, download_results_ok))
+	installation_tasks: list[InstallationTask] = storage_manager.generate_mod_install_tasks(
+		bonelab_game, my_mods, PLATFORM
+	)
 
-	logger.info(f"Extracting {len(installation_tasks)} file(s)")
+	logger.info(f"Installing {len(installation_tasks)} file(s)")
 	logger.debug(f"Files to extract: {installation_tasks}")
 
 	installer: ModInstaller = ModInstaller(EXTRACTIONS_PATH, mods_folder)
