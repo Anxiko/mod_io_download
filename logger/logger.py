@@ -34,7 +34,7 @@ def logger_set_up() -> None:
 	stdout_handler.setFormatter(basic_formatter)
 
 	file_handler: RotatingFileHandler = RotatingFileHandler(
-		ROOT_LOGGER_NAME, encoding="utf8",
+		_LOGGER_FILE_NAME, encoding="utf8",
 		maxBytes=(1 * 1024 ** 2),  # 1MiB
 		backupCount=10
 	)
