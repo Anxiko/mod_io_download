@@ -120,6 +120,7 @@ def main() -> None:
 
 	logger.info("Checking for present managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
+	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
 	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)

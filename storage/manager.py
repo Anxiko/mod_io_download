@@ -1,8 +1,11 @@
 import hashlib
+import sys
 from logging import Logger
 from os import PathLike
 from pathlib import Path
 from typing import Iterable, TypeVar
+
+from tqdm import tqdm
 
 import logger
 from api_client.models.game import Game
@@ -42,7 +45,6 @@ class ModStorageManager:
 
 	def __init__(self, storage: Storage):
 		self._storage = storage
-		self._validate()
 		self._save_to_file()
 
 	@classmethod
@@ -51,6 +53,19 @@ class ModStorageManager:
 			storage: Storage = Storage.parse_file(cls._FILE_PATH)
 			return cls(storage)
 		return cls(Storage())
+
+	def validate(self) -> None:
+		validated_storage: Storage = Storage()
+
+		for game_name_id, game_mods in self._storage.games.items():
+			for mod_name_id, managed_mod in tqdm(
+					game_mods.items(), desc=f"Verifying {game_name_id}", unit="mod", file=sys.stdout
+			):
+				verified_managed_mod: ManagedMod = self._validate_entry(managed_mod)
+				if verified_managed_mod.contains_info():
+					validated_storage.write_managed_mod(game_name_id, mod_name_id, verified_managed_mod)
+
+		self._storage = validated_storage
 
 	def needs_download(self, game_name_id: str, mod_name_id: str, mod_file_id: int) -> bool:
 		mod: ManagedMod | None = self._storage.read_managed_mod(game_name_id, mod_name_id)
@@ -227,17 +242,6 @@ class ModStorageManager:
 			downloaded_mod=verified_downloaded_mod,
 			installed_mod=verified_installed_mod
 		)
-
-	def _validate(self) -> None:
-		validated_storage: Storage = Storage()
-
-		for game_name_id, game_mods in self._storage.games.items():
-			for mod_name_id, managed_mod in game_mods.items():
-				verified_managed_mod: ManagedMod = self._validate_entry(managed_mod)
-				if verified_managed_mod.contains_info():
-					validated_storage.write_managed_mod(game_name_id, mod_name_id, verified_managed_mod)
-
-		self._storage = validated_storage
 
 	def _get_mod(self, game_name_id: str, mod_name_id: str) -> ManagedMod | None:
 		try:

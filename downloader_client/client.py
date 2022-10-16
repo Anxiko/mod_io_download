@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from typing import Awaitable, Callable
 
 import httpx
@@ -44,7 +45,8 @@ class DownloaderClient:
 
 		total_bytes: int = sum(map(DownloadTask.get_mod_file_size, self._download_tasks))
 		with tqdm(
-				total=total_bytes, unit_scale=True, unit_divisor=1024, unit='B', desc="Download progress"
+				total=total_bytes, unit_scale=True, unit_divisor=1024, unit='B', desc="Download progress",
+				file=sys.stdout
 		) as progress:
 			async with httpx.AsyncClient(follow_redirects=True) as client:
 				awaitables: list[Awaitable[DownloadResult]] = [
