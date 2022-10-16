@@ -17,6 +17,9 @@ class DownloadTask:
 	def get_mod_file_id(self) -> int:
 		return self.mod_file.id
 
+	def get_mod_file_size(self) -> int:
+		return self.mod_file.filesize
+
 
 @dataclass
 class DownloadResultOk:
