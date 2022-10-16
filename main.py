@@ -118,7 +118,7 @@ def main() -> None:
 	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
 	logger.debug(f"{my_mods=}")
 
-	logger.info("Checking for present managed mods...")
+	logger.info("Verifying managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
@@ -127,58 +127,62 @@ def main() -> None:
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
 
-	download_tasks: list[DownloadTask] = list(map(partial(to_download_task, client, bonelab_game), mods_need_download))
-	logger.info(f"Generated {len(download_tasks)} download task(s)")
-	logger.debug(f"{download_tasks=}")
+	if len(mods_need_download) > 0:
+		download_tasks: list[DownloadTask] = list(
+			map(partial(to_download_task, client, bonelab_game), mods_need_download))
+		logger.info(f"Generated {len(download_tasks)} download task(s)")
+		logger.debug(f"{download_tasks=}")
 
-	download_results: list[DownloadResult] = download_mods(download_tasks)
-	logger.info(f"Generated {len(download_results)} result(s)")
-	logger.debug(f"{download_results=}")
+		download_results: list[DownloadResult] = download_mods(download_tasks)
+		logger.info(f"Generated {len(download_results)} result(s)")
+		logger.debug(f"{download_results=}")
 
-	download_results_ok: list[DownloadResult]
-	download_results_error: list[DownloadResult]
+		download_results_ok: list[DownloadResult]
+		download_results_error: list[DownloadResult]
 
-	download_results_ok, download_results_error = binary_partition(download_results, DownloadResult.is_ok)
-	if download_results_ok:
-		logger.info(f"{len(download_results_ok)} download(s) OK")
-	if download_results_error:
-		logger.warning(f"{len(download_results_error)} download(s) failed")
-		logger.debug(f"Failed to download: {download_results_error}")
+		download_results_ok, download_results_error = binary_partition(download_results, DownloadResult.is_ok)
+		if download_results_ok:
+			logger.info(f"{len(download_results_ok)} download(s) OK")
+		if download_results_error:
+			logger.warning(f"{len(download_results_error)} download(s) failed")
+			logger.debug(f"Failed to download: {download_results_error}")
 
-	logger.info(f"Updating storage manager with downloaded mods")
-	storage_manager.update_downloaded_mods(download_results_ok)
+		logger.info(f"Updating storage manager with downloaded mods")
+		storage_manager.update_downloaded_mods(download_results_ok)
 
 	installation_tasks: list[InstallationTask] = storage_manager.generate_mod_install_tasks(
 		bonelab_game, my_mods, PLATFORM
 	)
 
-	logger.info(f"Installing {len(installation_tasks)} file(s)")
-	logger.debug(f"Files to extract: {installation_tasks}")
+	logger.info(f"{len(installation_tasks)} mod(s) to install")
+	logger.debug(f"Mods to install: {installation_tasks}")
 
-	installer: ModInstaller = ModInstaller(EXTRACTIONS_PATH, mods_folder)
-	installation_results: list[InstallationResult] = install_downloaded_mods(installer, installation_tasks)
+	if len(installation_tasks) > 0:
+		installer: ModInstaller = ModInstaller(EXTRACTIONS_PATH, mods_folder)
+		installation_results: list[InstallationResult] = install_downloaded_mods(installer, installation_tasks)
 
-	installed_ok: list[InstallationResult]
-	installed_error: list[InstallationResult]
+		installed_ok: list[InstallationResult]
+		installed_error: list[InstallationResult]
 
-	installed_ok, installed_error = binary_partition(installation_results, InstallationResult.is_ok)
+		installed_ok, installed_error = binary_partition(installation_results, InstallationResult.is_ok)
 
-	if installed_ok:
-		logger.info(f"Installed {len(installed_ok)} mod(s)")
-		logger.debug(f"Installed mods are: {installed_ok}")
+		if installed_ok:
+			logger.info(f"Installed {len(installed_ok)} mod(s)")
+			logger.debug(f"Installed mods are: {installed_ok}")
 
-	if installed_error:
-		logger.warning(f"Failed to install {len(installed_error)} mod(s)")
-		logger.debug(f"Failed to install mods are: {installed_error}")
+		if installed_error:
+			logger.warning(f"Failed to install {len(installed_error)} mod(s)")
+			logger.debug(f"Failed to install mods are: {installed_error}")
 
-	logger.info("Updating store manager with installed mods")
-	storage_manager.update_installed_mods(installed_ok)
+		logger.info("Updating store manager with installed mods")
+		storage_manager.update_installed_mods(installed_ok)
 
+	logger.info("Uninstalling managed mods no longer subscribed to")
 	uninstalled_mods: set[str] = uninstalled_unsubscribed_mods(storage_manager, bonelab_game, my_mods)
 	logger.info(f"Uninstalled {len(uninstalled_mods)} mod(s)")
 	logger.debug(f"Uninstalled mods are: {uninstalled_mods}")
 
-	logger.info(f"Removing extractions directory, {EXTRACTIONS_PATH}")
+	logger.info(f"Removing extractions directory: {EXTRACTIONS_PATH}")
 	nuke_path(EXTRACTIONS_PATH)
 
 	logger.info(f"Closing...")
