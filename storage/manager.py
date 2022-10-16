@@ -167,13 +167,16 @@ class ModStorageManager:
 			del managed_mods_dict[managed_unsubscribed_mod]
 
 		self._storage.replace_managed_mods(game_name_id, managed_mods_dict)
+		self._save_to_file()
 		return managed_unsubscribed_mod_set
 
 	@staticmethod
 	def _remove_managed_mod_files(managed_mod: ManagedMod) -> None:
-		for installed_path in managed_mod.installed_mod.installed_paths:
-			nuke_path(installed_path)
-		nuke_path(managed_mod.downloaded_mod.file_path)
+		if managed_mod.installed_mod is not None:
+			for installed_path in managed_mod.installed_mod.installed_paths:
+				nuke_path(installed_path)
+		if managed_mod.downloaded_mod is not None:
+			nuke_path(managed_mod.downloaded_mod.file_path)
 
 	def _save_to_file(self) -> None:
 		as_json: str = self._storage.json(indent='\t', ensure_ascii=False)

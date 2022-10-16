@@ -3,6 +3,7 @@ from functools import partial
 from typing import Awaitable
 
 import httpx
+from tqdm import tqdm
 
 from .task import DownloadResult, DownloadTask
 
@@ -21,10 +22,15 @@ class DownloaderClient:
 				async with client.stream('GET', download_task.download_url) as response:
 					response.raise_for_status()
 					total: int = int(response.headers['Content-Length'])
-					chunk: bytes
-					async for chunk in response.aiter_bytes():
-						f.write(chunk)
-					return DownloadResult.result_ok(download_task, total)
+
+					previous_downloaded_bytes: int = response.num_bytes_downloaded
+					with tqdm(total=total, unit_scale=True, unit_divisor=1024, unit='B') as progress:
+						chunk: bytes
+						async for chunk in response.aiter_bytes():
+							progress.update(response.num_bytes_downloaded - previous_downloaded_bytes)
+							previous_downloaded_bytes = response.num_bytes_downloaded
+							f.write(chunk)
+						return DownloadResult.result_ok(download_task, total)
 
 			except Exception as e:
 				return DownloadResult.result_error(download_task, e)
