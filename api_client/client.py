@@ -1,10 +1,14 @@
+import asyncio
 import logging
+import sys
 from string import Template
-from typing import BinaryIO, Optional, Type, TypeVar
+from typing import Awaitable, BinaryIO, Callable, Optional, Type, TypeVar
 from urllib.parse import urljoin
 
+import httpx
 import pydantic
 from requests import Request, Response, Session
+from tqdm.asyncio import tqdm
 
 from logger import get_logger
 from .models.game import Game
@@ -139,3 +143,25 @@ class ApiClient:
 		)
 		self._add_api_key_authorization(request)
 		return self._run_request(request, ModFile)
+
+	async def _get_mod_file_by_id_async(
+			self, async_client: httpx.AsyncClient, game_id: int, mod_id: int, mod_file_id: int,
+			callback: Callable[[], None]
+	) -> ModFile:
+		url: str = self._form_url(self._GET_MOD_FILE_ENDPOINT, game_id=game_id, mod_id=mod_id, mod_file_id=mod_file_id)
+		response: httpx.Response = await async_client.get(url, params=dict(api_key=self._api_key))
+		response.raise_for_status()
+		mod_file: ModFile = ModFile.parse_obj(response.json())
+		callback()
+		return mod_file
+
+	async def get_mod_files_concurrently(
+			self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]]
+	) -> list[ModFile]:
+		async with httpx.AsyncClient() as client:
+			tasks: list[Awaitable[ModFile]] = [
+				self._get_mod_file_by_id_async(client, game_id, mod_id, mod_file_id, lambda: None)
+				for mod_id, mod_file_id in mod_and_mod_file_tuples
+			]
+
+			return await tqdm.gather(*tasks, file=sys.stdout)

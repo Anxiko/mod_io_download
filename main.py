@@ -123,6 +123,11 @@ def main() -> None:
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
+	all_mod_files: list[ModFile] = asyncio.run(client.get_mod_files_concurrently(
+		bonelab_game.id, [(mod.id, mod.get_platform(PLATFORM).modfile_live) for mod in my_mods]
+	))
+	logger.debug(all_mod_files)
+
 	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
