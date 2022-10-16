@@ -4,6 +4,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Iterable, TypeVar
 
+import logger
 from api_client.models.game import Game
 from api_client.models.mod import Mod
 from api_client.models.platform import TargetPlatform
@@ -11,7 +12,6 @@ from downloader_client.task import DownloadResult
 from installer.task import InstallationResult, InstallationTask
 from utils.files import nuke_path
 from .models import DownloadedManagedMod, InstalledManagedMod, ManagedMod, Storage
-import logger
 
 logger: Logger = logger.get_logger(__name__)
 
@@ -210,17 +210,11 @@ class ModStorageManager:
 		if installed_mod is None:
 			return None
 
-		verified_installed_paths: list[Path] = list(filter(
-			Path.is_dir,
-			installed_mod.installed_paths
-		))
+		if all(map(Path.is_dir, installed_mod.installed_paths)):
+			return installed_mod
+		return None
 
-		return InstalledManagedMod(
-			mod_file_id=installed_mod.mod_file_id,
-			installed_paths=verified_installed_paths
-		)
-
-	def _entry_is_valid(self, _game_name_id: str, _mod_name_id: str, stored_mod_file: ManagedMod) -> bool:
+	def _validate_entry(self, stored_mod_file: ManagedMod) -> ManagedMod:
 		verified_downloaded_mod: DownloadedManagedMod | None = self._verify_downloaded_mod(
 			stored_mod_file.downloaded_mod
 		)
@@ -229,18 +223,19 @@ class ModStorageManager:
 			stored_mod_file.installed_mod
 		)
 
-		stored_mod_file.downloaded_mod = verified_downloaded_mod
-		stored_mod_file.installed_mod = verified_installed_mod
-
-		return stored_mod_file.contains_info()
+		return ManagedMod(
+			downloaded_mod=verified_downloaded_mod,
+			installed_mod=verified_installed_mod
+		)
 
 	def _validate(self) -> None:
 		validated_storage: Storage = Storage()
 
 		for game_name_id, game_mods in self._storage.games.items():
 			for mod_name_id, managed_mod in game_mods.items():
-				if self._entry_is_valid(game_name_id, mod_name_id, managed_mod):
-					validated_storage.write_managed_mod(game_name_id, mod_name_id, managed_mod)
+				verified_managed_mod: ManagedMod = self._validate_entry(managed_mod)
+				if verified_managed_mod.contains_info():
+					validated_storage.write_managed_mod(game_name_id, mod_name_id, verified_managed_mod)
 
 		self._storage = validated_storage
 

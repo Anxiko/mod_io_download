@@ -118,8 +118,9 @@ def main() -> None:
 	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
 	logger.debug(f"{my_mods=}")
 
+	logger.info("Checking for present managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
-	logger.info(f"Verified downloads integrity")
+	logger.info(f"Verified managed mods integrity")
 
 	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
