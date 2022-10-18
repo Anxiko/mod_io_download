@@ -1,13 +1,14 @@
-import asyncio
+import logging
 import logging
 import sys
 from string import Template
-from typing import Awaitable, BinaryIO, Callable, Optional, Type, TypeVar
+from threading import Lock
+from types import TracebackType
+from typing import Any, Awaitable, Optional, Type, TypeVar
 from urllib.parse import urljoin
 
 import httpx
 import pydantic
-from requests import Request, Response, Session
 from tqdm.asyncio import tqdm
 
 from logger import get_logger
@@ -41,6 +42,9 @@ class ApiClient:
 	_api_key: str
 	_oauth_key: str
 	_api_url: str
+	_httpx_client: httpx.AsyncClient | None
+	_enter_count: int
+	_lock: Lock
 
 	_GET_MOD_FILE_ENDPOINT: Template = Template('games/${game_id}/mods/${mod_id}/files/${mod_file_id}')
 	_FILE_MAX_SIZE: int = 500 * (1024 ** 2)  # 500MiB
@@ -51,6 +55,31 @@ class ApiClient:
 		self._api_key = api_key
 		self._oauth_key = oauth_key
 		self._api_url = api_url
+		self._httpx_client = None
+		self._enter_count = 0
+		self._lock = Lock()
+
+	async def __aenter__(self) -> 'ApiClient':
+		with self._lock:
+			if self._enter_count == 0:
+				if self._httpx_client is not None:
+					raise ApiClientException(
+						f"Count was {self._enter_count=}, but client was {self._httpx_client=}"
+					)
+				self._httpx_client = await httpx.AsyncClient().__aenter__()
+			self._enter_count += 1
+			return self
+
+	async def __aexit__(self, exc_type: Type[BaseException], exc_val: BaseException, exc_tb: TracebackType) -> None:
+		with self._lock:
+			if self._enter_count <= 0:
+				raise ApiClientException(
+					f"Attempted to exit, but count was {self._enter_count=}"
+				)
+			self._enter_count -= 1
+			if self._enter_count == 0:
+				await self._httpx_client.__aexit__(exc_type, exc_val, exc_tb)
+				self._httpx_client = None
 
 	def _form_url(self, endpoint: str | Template, **kwargs) -> str:
 		if isinstance(endpoint, Template):
@@ -59,108 +88,85 @@ class ApiClient:
 			raise TypeError("Can't substitute from str endpoint")
 		return urljoin(self._api_url, endpoint)
 
-	@staticmethod
-	def _run_request(request: Request, response_type: Type[ResponseType]) -> ResponseType:
-		with Session() as s:
-			response: Response = s.send(request.prepare())
+	async def _run_request(self, request: httpx.Request, response_type: Type[ResponseType]) -> ResponseType:
+		async with self:
+			response: httpx.Response = await self._httpx_client.send(request)
 			response.raise_for_status()
 
 			return response_type.parse_obj(response.json())
 
-	@classmethod
-	def _run_file_request(cls, request: Request, fp: BinaryIO) -> None:
-		with Session() as s:
-			s.stream = True
-			response: Response = s.send(request.prepare())
-			response.raise_for_status()
-			content_length: int = int(response.headers['Content-Length'])
-			if content_length > cls._FILE_MAX_SIZE:
-				raise ApiClientDownloadSizeException(
-					max_accepted=cls._FILE_MAX_SIZE, actual=content_length
-				)
-
-			file_chunk: bytes
-			for file_chunk in response.iter_content():
-				fp.write(file_chunk)
-
 	@staticmethod
-	def _add_offset(request: Request, offset: int = 0) -> None:
-		request.params['_offset'] = offset
+	def _set_param(request: httpx.Request, key: str, value: Any) -> None:
+		request.url = request.url.copy_set_param(key, value)
 
-	def _add_api_key_authorization(self, request: Request) -> None:
-		request.params['api_key'] = self._api_key
+	@classmethod
+	def _add_offset(cls, request: httpx.Request, offset: int = 0) -> None:
+		cls._set_param(request, '_offset', offset)
 
-	def _add_oauth_authorization(self, request: Request) -> None:
+	def _add_api_key_authorization(self, request: httpx.Request) -> None:
+		self._set_param(request, 'api_key', self._api_key)
+
+	def _add_oauth_authorization(self, request: httpx.Request) -> None:
 		request.headers['Authorization'] = f'Bearer {self._oauth_key}'
 
 	@staticmethod
-	def _add_platform(request: Request, platform: TargetPlatform) -> None:
+	def _add_platform(request: httpx.Request, platform: TargetPlatform) -> None:
 		request.headers['X-Modio-Platform'] = platform.value
 
-	def _run_paginated_request(
-			self, request: Request, response_type: Type[InnerResponseType]
+	async def _run_paginated_request(
+			self, request: httpx.Request, response_type: Type[InnerResponseType]
 	) -> list[InnerResponseType]:
-		offset: int = 0
-		rv: list[InnerResponseType] = []
-		while offset is not None:
-			self._add_offset(request, offset)
-			paginated_response: PaginatedResponse[response_type] = self._run_request(
-				request, PaginatedResponse[response_type]
-			)
-			rv.extend(paginated_response.data)
-			offset = paginated_response.next_offset()
-		return rv
+		async with self:
+			offset: int = 0
+			rv: list[InnerResponseType] = []
+			while offset is not None:
+				self._add_offset(request, offset)
+				paginated_response: PaginatedResponse[response_type] = await self._run_request(
+					request, PaginatedResponse[response_type]
+				)
+				rv.extend(paginated_response.data)
+				offset = paginated_response.next_offset()
+			return rv
 
-	def get_games(self, name_id: Optional[str] = None) -> list[Game]:
+	async def get_games(self, name_id: Optional[str] = None) -> list[Game]:
 		logger.info(f"Getting all games, {name_id=}")
-		request: Request = Request('GET', self._form_url('games'))
+		request: httpx.Request = httpx.Request('GET', self._form_url('games'))
 		if name_id is not None:
-			request.params['name_id'] = name_id
+			self._set_param(request, 'name_id', name_id)
 		self._add_api_key_authorization(request)
-		return self._run_paginated_request(request, Game)
+		return await self._run_paginated_request(request, Game)
 
-	def get_mod_subscriptions(
+	async def get_mod_subscriptions(
 			self, game_id: Optional[int] = None, platform: TargetPlatform = None
 	) -> list[Mod]:
 		logger.info(f"Getting mod subscriptions, {game_id=}, {platform=}")
-		request: Request = Request('GET', self._form_url('me/subscribed'))
+		request: httpx.Request = httpx.Request('GET', self._form_url('me/subscribed'))
 		if game_id is not None:
-			request.params['game_id'] = game_id
+			self._set_param(request, 'game_id', game_id)
 
 		if platform:
 			self._add_platform(request, platform)
 
 		self._add_oauth_authorization(request)
-		return self._run_paginated_request(request, Mod)
+		return await self._run_paginated_request(request, Mod)
 
-	def get_mod_file_by_id(self, game_id: int, mod_id: int, mod_file_id: int) -> ModFile:
+	async def get_mod_file_by_id(self, game_id: int, mod_id: int, mod_file_id: int) -> ModFile:
 		logger.info(f"Getting mod file for {game_id=}, {mod_id=}, {mod_file_id=}")
-		request: Request = Request(
+		request: httpx.Request = httpx.Request(
 			'GET',
 			self._form_url(
 				self._GET_MOD_FILE_ENDPOINT, game_id=game_id, mod_id=mod_id, mod_file_id=mod_file_id
 			)
 		)
 		self._add_api_key_authorization(request)
-		return self._run_request(request, ModFile)
-
-	async def _get_mod_file_by_id_async(
-			self, async_client: httpx.AsyncClient, game_id: int, mod_id: int, mod_file_id: int,
-			callback: Callable[[], None]
-	) -> ModFile:
-		url: str = self._form_url(self._GET_MOD_FILE_ENDPOINT, game_id=game_id, mod_id=mod_id, mod_file_id=mod_file_id)
-		response: httpx.Response = await async_client.get(url, params=dict(api_key=self._api_key))
-		response.raise_for_status()
-		mod_file: ModFile = ModFile.parse_obj(response.json())
-		callback()
-		return mod_file
+		return await self._run_request(request, ModFile)
 
 	async def get_mod_files_concurrently(
 			self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]]
 	) -> list[ModFile]:
-		async with httpx.AsyncClient() as client:
+		async with self:
 			tasks: list[Awaitable[ModFile]] = [
-				self._get_mod_file_by_id_async(client, game_id, mod_id, mod_file_id, lambda: None)
+				self.get_mod_file_by_id(game_id, mod_id, mod_file_id)
 				for mod_id, mod_file_id in mod_and_mod_file_tuples
 			]
 

@@ -37,9 +37,9 @@ def generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetP
 	return f'{name}{extension}'
 
 
-def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
+async def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
 	mod_platform: ModPlatform = mod.get_platform(PLATFORM)
-	mod_file: ModFile = client.get_mod_file_by_id(
+	mod_file: ModFile = await client.get_mod_file_by_id(
 		game_id=game.id, mod_id=mod.id, mod_file_id=mod_platform.modfile_live
 	)
 
@@ -62,8 +62,8 @@ def download_mods(download_tasks: list[DownloadTask]) -> list[DownloadResult]:
 	return results
 
 
-def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
-	games: list[Game] = client.get_games(name_id=name_id)
+async def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
+	games: list[Game] = await client.get_games(name_id=name_id)
 	if len(games) == 0:
 		raise ValueError(f"Found no games for {name_id=!r}")
 	if len(games) > 1:
@@ -94,7 +94,7 @@ def uninstalled_unsubscribed_mods(
 	return manager.remove_unsubscribed_mods(game.name_id, subscribed_mods)
 
 
-def main() -> None:
+async def main() -> None:
 	logger.info("Starting...")
 	config: Config = Config.from_file()
 	client: ApiClient = ApiClient(
@@ -109,10 +109,10 @@ def main() -> None:
 		raise Exception(error_msg)
 	logger.info(f"Resolved mods folder to: {mods_folder}")
 
-	bonelab_game: Game = get_game_by_name_id(client, BONELAB_NAME_ID)
+	bonelab_game: Game = await get_game_by_name_id(client, BONELAB_NAME_ID)
 	logger.debug(f"Got target game: {bonelab_game}")
 
-	my_mods: list[Mod] = client.get_mod_subscriptions(
+	my_mods: list[Mod] = await client.get_mod_subscriptions(
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
 	)
 	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
@@ -123,9 +123,9 @@ def main() -> None:
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
-	all_mod_files: list[ModFile] = asyncio.run(client.get_mod_files_concurrently(
+	all_mod_files: list[ModFile] = await client.get_mod_files_concurrently(
 		bonelab_game.id, [(mod.id, mod.get_platform(PLATFORM).modfile_live) for mod in my_mods]
-	))
+	)
 	logger.debug(all_mod_files)
 
 	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
@@ -195,4 +195,4 @@ def main() -> None:
 
 if __name__ == '__main__':
 	logger_set_up()
-	main()
+	asyncio.run(main())
