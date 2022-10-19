@@ -129,7 +129,7 @@ class ApiClient:
 			return rv
 
 	async def get_games(self, name_id: Optional[str] = None) -> list[Game]:
-		logger.info(f"Getting all games, {name_id=}")
+		logger.debug(f"Getting all games, {name_id=}")
 		request: httpx.Request = httpx.Request('GET', self._form_url('games'))
 		if name_id is not None:
 			self._set_param(request, 'name_id', name_id)
@@ -139,7 +139,7 @@ class ApiClient:
 	async def get_mod_subscriptions(
 			self, game_id: Optional[int] = None, platform: TargetPlatform = None
 	) -> list[Mod]:
-		logger.info(f"Getting mod subscriptions, {game_id=}, {platform=}")
+		logger.debug(f"Getting mod subscriptions, {game_id=}, {platform=}")
 		request: httpx.Request = httpx.Request('GET', self._form_url('me/subscribed'))
 		if game_id is not None:
 			self._set_param(request, 'game_id', game_id)
@@ -151,7 +151,7 @@ class ApiClient:
 		return await self._run_paginated_request(request, Mod)
 
 	async def get_mod_file_by_id(self, game_id: int, mod_id: int, mod_file_id: int) -> ModFile:
-		logger.info(f"Getting mod file for {game_id=}, {mod_id=}, {mod_file_id=}")
+		logger.debug(f"Getting mod file for {game_id=}, {mod_id=}, {mod_file_id=}")
 		request: httpx.Request = httpx.Request(
 			'GET',
 			self._form_url(
