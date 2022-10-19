@@ -1,4 +1,5 @@
 import hashlib
+import multiprocessing
 import sys
 from logging import Logger
 from os import PathLike
@@ -54,14 +55,19 @@ class ModStorageManager:
 			return cls(storage)
 		return cls(Storage())
 
+	@classmethod
+	def _to_validated_tuple(cls, name_id_and_managed_mod: tuple[str, ManagedMod]) -> tuple[str, ManagedMod]:
+		mod_name_id, managed_mod = name_id_and_managed_mod
+		return mod_name_id, cls._validate_entry(managed_mod)
+
 	def validate(self) -> None:
 		validated_storage: Storage = Storage()
 
+		game_mods: dict[str, ManagedMod]
 		for game_name_id, game_mods in self._storage.games.items():
-			for mod_name_id, managed_mod in tqdm(
-					game_mods.items(), desc=f"Verifying {game_name_id}", unit="mod", file=sys.stdout
-			):
-				verified_managed_mod: ManagedMod = self._validate_entry(managed_mod)
+			with multiprocessing.Pool() as pool:
+				result: list[tuple[str, ManagedMod]] = pool.map(self._to_validated_tuple, game_mods.items())
+			for mod_name_id, verified_managed_mod in result:
 				if verified_managed_mod.contains_info():
 					validated_storage.write_managed_mod(game_name_id, mod_name_id, verified_managed_mod)
 
@@ -229,12 +235,13 @@ class ModStorageManager:
 			return installed_mod
 		return None
 
-	def _validate_entry(self, stored_mod_file: ManagedMod) -> ManagedMod:
-		verified_downloaded_mod: DownloadedManagedMod | None = self._verify_downloaded_mod(
+	@classmethod
+	def _validate_entry(cls, stored_mod_file: ManagedMod) -> ManagedMod:
+		verified_downloaded_mod: DownloadedManagedMod | None = cls._verify_downloaded_mod(
 			stored_mod_file.downloaded_mod
 		)
 
-		verified_installed_mod: InstalledManagedMod | None = self._verify_installed_mod(
+		verified_installed_mod: InstalledManagedMod | None = cls._verify_installed_mod(
 			stored_mod_file.installed_mod
 		)
 
