@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import logging
 import sys
@@ -162,7 +163,8 @@ class ApiClient:
 		return await self._run_request(request, ModFile)
 
 	async def get_mod_files_concurrently(
-			self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]]
+			self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]],
+			progress_message: bool | str = True
 	) -> list[ModFile]:
 		async with self:
 			tasks: list[Awaitable[ModFile]] = [
@@ -170,4 +172,8 @@ class ApiClient:
 				for mod_id, mod_file_id in mod_and_mod_file_tuples
 			]
 
-			return await tqdm.gather(*tasks, file=sys.stdout)
+			if progress_message:
+				if progress_message is True:
+					progress_message = "Getting mod files"
+				return await tqdm.gather(*tasks, file=sys.stdout, desc=progress_message)
+			return await asyncio.gather(*tasks)

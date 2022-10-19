@@ -37,12 +37,8 @@ def generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetP
 	return f'{name}{extension}'
 
 
-async def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadTask:
-	mod_platform: ModPlatform = mod.get_platform(PLATFORM)
-	mod_file: ModFile = await client.get_mod_file_by_id(
-		game_id=game.id, mod_id=mod.id, mod_file_id=mod_platform.modfile_live
-	)
-
+def _to_download_task(game, mod_and_mod_file: tuple[Mod, ModFile]) -> DownloadTask:
+	mod, mod_file = mod_and_mod_file
 	filename: str = generate_filename(game, mod, mod_file, PLATFORM)
 	dir_path: Path = DOWNLOADS_PATH / game.name_id / mod.name_id
 	os.makedirs(dir_path, exist_ok=True)
@@ -56,9 +52,24 @@ async def to_download_task(client: ApiClient, game: Game, mod: Mod) -> DownloadT
 	)
 
 
-def download_mods(download_tasks: list[DownloadTask]) -> list[DownloadResult]:
+async def generate_download_tasks(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadTask]:
+	mod_files: list[ModFile] = await client.get_mod_files_concurrently(
+		game.id,
+		[
+			(mod.id, mod.get_platform(PLATFORM).modfile_live)
+			for mod in mods
+		]
+	)
+
+	return list(map(
+		partial(_to_download_task, game),
+		zip(mods, mod_files)
+	))
+
+
+async def download_mods(download_tasks: list[DownloadTask]) -> list[DownloadResult]:
 	downloader_client: DownloaderClient = DownloaderClient(download_tasks)
-	results: list[DownloadResult] = asyncio.run(downloader_client.download())
+	results: list[DownloadResult] = await downloader_client.download()
 	return results
 
 
@@ -123,22 +134,16 @@ async def main() -> None:
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
-	all_mod_files: list[ModFile] = await client.get_mod_files_concurrently(
-		bonelab_game.id, [(mod.id, mod.get_platform(PLATFORM).modfile_live) for mod in my_mods]
-	)
-	logger.debug(all_mod_files)
-
 	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
 
 	if len(mods_need_download) > 0:
-		download_tasks: list[DownloadTask] = list(
-			map(partial(to_download_task, client, bonelab_game), mods_need_download))
+		download_tasks: list[DownloadTask] = await generate_download_tasks(client, bonelab_game, mods_need_download)
 		logger.info(f"Generated {len(download_tasks)} download task(s)")
 		logger.debug(f"{download_tasks=}")
 
-		download_results: list[DownloadResult] = download_mods(download_tasks)
+		download_results: list[DownloadResult] = await download_mods(download_tasks)
 		logger.info(f"Generated {len(download_results)} result(s)")
 		logger.debug(f"{download_results=}")
 
