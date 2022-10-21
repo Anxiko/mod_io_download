@@ -2,6 +2,7 @@ import asyncio
 import logging
 import logging
 import sys
+from json import JSONDecodeError
 from string import Template
 from threading import Lock
 from types import TracebackType
@@ -92,7 +93,15 @@ class ApiClient:
 	async def _run_request(self, request: httpx.Request, response_type: Type[ResponseType]) -> ResponseType:
 		async with self:
 			response: httpx.Response = await self._httpx_client.send(request)
-			response.raise_for_status()
+			try:
+				response.raise_for_status()
+			except httpx.HTTPStatusError as e:
+				logger.exception(f"Request {request=} failed: {e!r}")
+				try:
+					logger.error(f"Body of response: {response.json()}")
+				except JSONDecodeError:
+					logger.warning(f"Failed to decode error response body")
+				raise
 
 			return response_type.parse_obj(response.json())
 
