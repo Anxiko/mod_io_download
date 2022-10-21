@@ -28,6 +28,7 @@ class Mod(BaseModel):
 	name_id: StrictStr
 	modfile: ModFile
 	platforms: list[ModPlatform]
+	visible: bool
 
 	def get_platform(self, platform: TargetPlatform) -> ModPlatform:
 		return next(filter(
@@ -37,3 +38,7 @@ class Mod(BaseModel):
 
 	def supported_platforms(self) -> set[TargetPlatform]:
 		return set(map(ModPlatform.get_platform, self.platforms))
+
+	def is_available(self) -> bool:
+		"""Mod is available for download. Only checking visibility for now"""
+		return self.visible

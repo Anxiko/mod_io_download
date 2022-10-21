@@ -129,12 +129,20 @@ async def main() -> None:
 	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
 	logger.debug(f"{my_mods=}")
 
+	unavailable_mods: list[Mod]
+	available_mods: list[Mod]
+	available_mods, unavailable_mods = binary_partition(my_mods, Mod.is_available)
+
+	if len(unavailable_mods) > 0:
+		logger.warning(f"{len(unavailable_mods)} mod(s) unavailable")
+		logger.debug(f"{unavailable_mods=}")
+
 	logger.info("Verifying managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
-	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, my_mods, storage_manager)
+	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, available_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
 
