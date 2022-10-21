@@ -33,6 +33,14 @@ class ModInstaller:
 		self._extractions_path = extractions_path
 		self._installations_path = installations_path
 
+	def extract_and_install(self, installation_task: InstallationTask) -> InstallationResult:
+		try:
+			extracted_path: Path = self._extract_mod(installation_task.downloaded_path)
+			installation_paths: list[Path] = self._install_mod(extracted_path)
+			return InstallationResult.create_ok(installation_task, installation_paths)
+		except ModInstallerException as e:
+			return InstallationResult.create_error(installation_task, e.reason)
+
 	def _get_path_for_mod_extraction(self, mod_file) -> Path:
 		name_without_extension: str = mod_file.stem
 		target_path: Path = self._extractions_path / name_without_extension
@@ -123,11 +131,3 @@ class ModInstaller:
 			lambda p: self._copy_to_mods_dir(p, self._installations_path),
 			content_paths
 		))
-
-	def extract_and_install(self, installation_task: InstallationTask) -> InstallationResult:
-		try:
-			extracted_path: Path = self._extract_mod(installation_task.downloaded_path)
-			installation_paths: list[Path] = self._install_mod(extracted_path)
-			return InstallationResult.create_ok(installation_task, installation_paths)
-		except ModInstallerException as e:
-			return InstallationResult.create_error(installation_task, e.reason)

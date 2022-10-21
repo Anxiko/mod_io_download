@@ -1,4 +1,5 @@
 import asyncio
+import multiprocessing
 import os
 from functools import partial
 from logging import Logger
@@ -96,7 +97,8 @@ def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageMa
 def install_downloaded_mods(
 		installer: ModInstaller, installation_tasks: list[InstallationTask]
 ) -> list[InstallationResult]:
-	return list(map(installer.extract_and_install, installation_tasks))
+	with multiprocessing.Pool() as pool:
+		return pool.map(installer.extract_and_install, installation_tasks)
 
 
 def uninstalled_unsubscribed_mods(
