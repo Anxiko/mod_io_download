@@ -1,13 +1,16 @@
 import asyncio
+import datetime
+import json
 import multiprocessing
 import os
+import sys
 from functools import partial
 from logging import Logger
 from pathlib import Path
 
 from api_client.client import ApiClient
 from api_client.models.game import Game
-from api_client.models.mod import Mod, ModPlatform
+from api_client.models.mod import Mod
 from api_client.models.mod_file import ModFile
 from api_client.models.platform import TargetPlatform
 from config import Config
@@ -25,6 +28,8 @@ DOWNLOADS_PATH: Path = Path('./downloads')
 EXTRACTIONS_PATH: Path = Path('./extractions')
 CONFIG_FILE: Path = Path('./config.json')
 STORAGE_FILE: Path = Path('./storage.json')
+EXPORTS_PATH: Path = Path("./exports")
+IMPORTS_PATH: Path = Path("./imports")
 
 BONELAB_NAME_ID: str = 'bonelab'
 PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
@@ -95,50 +100,21 @@ def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageMa
 
 
 def install_downloaded_mods(
-		installer: ModInstaller, installation_tasks: list[InstallationTask]
+	installer: ModInstaller, installation_tasks: list[InstallationTask]
 ) -> list[InstallationResult]:
 	with multiprocessing.Pool() as pool:
 		return pool.map(installer.extract_and_install, installation_tasks)
 
 
 def uninstalled_unsubscribed_mods(
-		manager: ModStorageManager, game: Game, subscribed_mods: list[Mod]
+	manager: ModStorageManager, game: Game, subscribed_mods: list[Mod]
 ) -> set[str]:
 	return manager.remove_unsubscribed_mods(game.name_id, subscribed_mods)
 
 
-async def main() -> None:
-	logger.info("Starting...")
-	config: Config = Config.from_file()
-	client: ApiClient = ApiClient(
-		api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token
-	)
-
-	appdata: str = os.getenv('APPDATA')
-	appdata_path: Path = Path(appdata)
-	mods_folder: Path = appdata_path.parent / 'LocalLow' / 'Stress Level Zero' / 'BONELAB' / 'Mods'
-	if not mods_folder.is_dir():
-		error_msg: str = f"Mods folder does not exist: {mods_folder}"
-		raise Exception(error_msg)
-	logger.info(f"Resolved mods folder to: {mods_folder}")
-
-	bonelab_game: Game = await get_game_by_name_id(client, BONELAB_NAME_ID)
-	logger.debug(f"Got target game: {bonelab_game}")
-
-	my_mods: list[Mod] = await client.get_mod_subscriptions(
-		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
-	)
-	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
-	logger.debug(f"{my_mods=}")
-
-	unavailable_mods: list[Mod]
-	available_mods: list[Mod]
-	available_mods, unavailable_mods = binary_partition(my_mods, Mod.is_available)
-
-	if len(unavailable_mods) > 0:
-		logger.warning(f"{len(unavailable_mods)} mod(s) unavailable")
-		logger.debug(f"{unavailable_mods=}")
-
+async def _sync(
+	client: ApiClient, bonelab_game: Game, my_mods: list[Mod], available_mods: list[Mod], mods_folder: Path
+) -> None:
 	logger.info("Verifying managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 	storage_manager.validate()
@@ -204,6 +180,79 @@ async def main() -> None:
 
 	logger.info(f"Removing extractions directory: {EXTRACTIONS_PATH}")
 	nuke_path(EXTRACTIONS_PATH)
+
+
+def _usage(name: str) -> None:
+	print(f"Usage: {name} {{sync | export | import}}")
+
+
+def _export(bonelab_game: Game, available_mods: list[Mod]) -> None:
+	export_content: dict[str, list[str]] = {
+		bonelab_game.name_id: [
+			available_mod.name_id
+			for available_mod in available_mods
+		]
+	}
+	timestamp: str = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+	filename: str = f"subs_export_{timestamp}.json"
+	file_path: Path = EXPORTS_PATH / filename
+	file_path.parent.mkdir(parents=True, exist_ok=True)
+	logger.info(f"Exporting subscriptions to {file_path}")
+	with open(file_path, mode='w', encoding='utf8', newline='\n') as f:
+		json.dump(export_content, f, indent='\t')
+
+
+async def main() -> None:
+	logger.info("Starting...")
+	config: Config = Config.from_file()
+	client: ApiClient = ApiClient(
+		api_url=config.api_url, api_key=config.api_key, oauth_key=config.oauth_token
+	)
+
+	appdata: str = os.getenv('APPDATA')
+	appdata_path: Path = Path(appdata)
+	mods_folder: Path = appdata_path.parent / 'LocalLow' / 'Stress Level Zero' / 'BONELAB' / 'Mods'
+	if not mods_folder.is_dir():
+		error_msg: str = f"Mods folder does not exist: {mods_folder}"
+		raise Exception(error_msg)
+	logger.info(f"Resolved mods folder to: {mods_folder}")
+
+	bonelab_game: Game = await get_game_by_name_id(client, BONELAB_NAME_ID)
+	logger.debug(f"Got target game: {bonelab_game}")
+
+	my_mods: list[Mod] = await client.get_mod_subscriptions(
+		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
+	)
+	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
+	logger.debug(f"{my_mods=}")
+
+	unavailable_mods: list[Mod]
+	available_mods: list[Mod]
+	available_mods, unavailable_mods = binary_partition(my_mods, Mod.is_available)
+
+	if len(unavailable_mods) > 0:
+		logger.warning(f"{len(unavailable_mods)} mod(s) unavailable")
+		logger.debug(f"{unavailable_mods=}")
+
+	args: list[str] = sys.argv[1:]
+	name: str
+	name, *args = sys.argv
+
+	match args:
+		case [] | ["sync"]:
+			await _sync(
+				client=client,
+				bonelab_game=bonelab_game,
+				my_mods=my_mods,
+				available_mods=available_mods,
+				mods_folder=mods_folder
+			)
+		case ["export"]:
+			_export(bonelab_game, available_mods)
+		case ["import"]:
+			pass
+		case [*invalid_args]:
+			_usage(name)
 
 	logger.info(f"Closing...")
 
