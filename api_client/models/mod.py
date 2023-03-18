@@ -26,7 +26,6 @@ class Mod(BaseModel):
 	game_id: StrictInt
 	name: StrictStr
 	name_id: StrictStr
-	modfile: ModFile
 	platforms: list[ModPlatform]
 	visible: bool
 
@@ -42,3 +41,7 @@ class Mod(BaseModel):
 	def is_available(self) -> bool:
 		"""Mod is available for download. Only checking visibility for now"""
 		return self.visible
+
+
+class ModWithModfile(Mod):
+	modfile: ModFile

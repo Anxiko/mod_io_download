@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import logging
 import sys
 from json import JSONDecodeError
 from string import Template
@@ -15,7 +14,7 @@ from tqdm.asyncio import tqdm
 
 from logger import get_logger
 from .models.game import Game
-from .models.mod import Mod
+from .models.mod import ModWithModfile, Mod
 from .models.mod_file import ModFile
 from .models.platform import TargetPlatform
 from .response import PaginatedResponse
@@ -49,10 +48,11 @@ class ApiClient:
 	_lock: Lock
 
 	_GET_MOD_FILE_ENDPOINT: Template = Template('games/${game_id}/mods/${mod_id}/files/${mod_file_id}')
+	_SUB_TO_MOD: Template = Template('games/${game_id}/mods/${mod_id}/subscribe')
 	_FILE_MAX_SIZE: int = 500 * (1024 ** 2)  # 500MiB
 
 	def __init__(
-			self, api_key: str, oauth_key: str, api_url: str
+		self, api_key: str, oauth_key: str, api_url: str
 	):
 		self._api_key = api_key
 		self._oauth_key = oauth_key
@@ -124,7 +124,7 @@ class ApiClient:
 		request.headers['X-Modio-Platform'] = platform.value
 
 	async def _run_paginated_request(
-			self, request: httpx.Request, response_type: Type[InnerResponseType]
+		self, request: httpx.Request, response_type: Type[InnerResponseType]
 	) -> list[InnerResponseType]:
 		async with self:
 			offset: int = 0
@@ -147,8 +147,8 @@ class ApiClient:
 		return await self._run_paginated_request(request, Game)
 
 	async def get_mod_subscriptions(
-			self, game_id: Optional[int] = None, platform: TargetPlatform = None
-	) -> list[Mod]:
+		self, game_id: Optional[int] = None, platform: TargetPlatform = None
+	) -> list[ModWithModfile]:
 		logger.debug(f"Getting mod subscriptions, {game_id=}, {platform=}")
 		request: httpx.Request = httpx.Request('GET', self._form_url('me/subscribed'))
 		if game_id is not None:
@@ -158,7 +158,7 @@ class ApiClient:
 			self._add_platform(request, platform)
 
 		self._add_oauth_authorization(request)
-		return await self._run_paginated_request(request, Mod)
+		return await self._run_paginated_request(request, ModWithModfile)
 
 	async def get_mod_file_by_id(self, game_id: int, mod_id: int, mod_file_id: int) -> ModFile:
 		logger.debug(f"Getting mod file for {game_id=}, {mod_id=}, {mod_file_id=}")
@@ -171,9 +171,20 @@ class ApiClient:
 		self._add_api_key_authorization(request)
 		return await self._run_request(request, ModFile)
 
+	async def sub_to_mod(self, game_id: int, mod_id: int) -> Mod:
+		logger.debug(f"Subscribing to {game_id=}, {mod_id=}")
+		request: httpx.Request = httpx.Request(
+			'POST',
+			self._form_url(self._SUB_TO_MOD, game_id=game_id, mod_id=mod_id)
+		)
+		request.headers['Content-Type'] = 'application/x-www-form-urlencoded'
+
+		self._add_oauth_authorization(request)
+		return await self._run_request(request, Mod)
+
 	async def get_mod_files_concurrently(
-			self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]],
-			progress_message: bool | str = True
+		self, game_id: int, mod_and_mod_file_tuples: list[tuple[int, int]],
+		progress_message: bool | str = True
 	) -> list[ModFile]:
 		async with self:
 			tasks: list[Awaitable[ModFile]] = [
@@ -184,5 +195,19 @@ class ApiClient:
 			if progress_message:
 				if progress_message is True:
 					progress_message = "Getting mod files"
+				return await tqdm.gather(*tasks, file=sys.stdout, desc=progress_message)
+			return await asyncio.gather(*tasks)
+
+	async def sub_to_mods_concurrently(
+		self, game_id: int, mod_ids: list[int], progress_message: bool | str = True
+	) -> list[Mod]:
+		async with self:
+			tasks: list[Awaitable[Mod]] = [
+				self.sub_to_mod(game_id, mod_id)
+				for mod_id in mod_ids
+			]
+			if progress_message:
+				if progress_message is True:
+					progress_message = "Subbing to mods"
 				return await tqdm.gather(*tasks, file=sys.stdout, desc=progress_message)
 			return await asyncio.gather(*tasks)

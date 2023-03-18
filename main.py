@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import json
 import multiprocessing
 import os
 import sys
@@ -9,8 +8,9 @@ from logging import Logger
 from pathlib import Path
 
 from api_client.client import ApiClient
+from api_client.models.export import SubscriptionsExport, SubscriptionsForGame
 from api_client.models.game import Game
-from api_client.models.mod import Mod
+from api_client.models.mod import ModWithModfile
 from api_client.models.mod_file import ModFile
 from api_client.models.platform import TargetPlatform
 from config import Config
@@ -37,13 +37,13 @@ PLATFORM: TargetPlatform = TargetPlatform.WINDOWS
 logger: Logger = get_logger(__name__)
 
 
-def generate_filename(game: Game, mod: Mod, mod_file: ModFile, platform: TargetPlatform) -> str:
+def generate_filename(game: Game, mod: ModWithModfile, mod_file: ModFile, platform: TargetPlatform) -> str:
 	name: str = '_'.join(filter(bool, [game.name_id, mod.name_id, mod_file.version, platform.value]))
 	extension: str = ''.join(Path(mod_file.filename).suffixes)
 	return f'{name}{extension}'
 
 
-def _to_download_task(game, mod_and_mod_file: tuple[Mod, ModFile]) -> DownloadTask:
+def _to_download_task(game, mod_and_mod_file: tuple[ModWithModfile, ModFile]) -> DownloadTask:
 	mod, mod_file = mod_and_mod_file
 	filename: str = generate_filename(game, mod, mod_file, PLATFORM)
 	dir_path: Path = DOWNLOADS_PATH / game.name_id / mod.name_id
@@ -58,7 +58,7 @@ def _to_download_task(game, mod_and_mod_file: tuple[Mod, ModFile]) -> DownloadTa
 	)
 
 
-async def generate_download_tasks(client: ApiClient, game: Game, mods: list[Mod]) -> list[DownloadTask]:
+async def generate_download_tasks(client: ApiClient, game: Game, mods: list[ModWithModfile]) -> list[DownloadTask]:
 	mod_files: list[ModFile] = await client.get_mod_files_concurrently(
 		game.id,
 		[
@@ -88,8 +88,8 @@ async def get_game_by_name_id(client: ApiClient, name_id: str) -> Game:
 	return games[0]
 
 
-def filter_need_download_mods(game: Game, mods: list[Mod], storage: ModStorageManager) -> list[Mod]:
-	def mod_need_download(mod: Mod) -> bool:
+def filter_need_download_mods(game: Game, mods: list[ModWithModfile], storage: ModStorageManager) -> list[ModWithModfile]:
+	def mod_need_download(mod: ModWithModfile) -> bool:
 		latest_mod_file_id: int = mod.get_platform(PLATFORM).modfile_live
 		return storage.needs_download(game.name_id, mod.name_id, latest_mod_file_id)
 
@@ -107,20 +107,20 @@ def install_downloaded_mods(
 
 
 def uninstalled_unsubscribed_mods(
-	manager: ModStorageManager, game: Game, subscribed_mods: list[Mod]
+	manager: ModStorageManager, game: Game, subscribed_mods: list[ModWithModfile]
 ) -> set[str]:
 	return manager.remove_unsubscribed_mods(game.name_id, subscribed_mods)
 
 
 async def _sync(
-	client: ApiClient, bonelab_game: Game, my_mods: list[Mod], available_mods: list[Mod], mods_folder: Path
+	client: ApiClient, bonelab_game: Game, my_mods: list[ModWithModfile], available_mods: list[ModWithModfile], mods_folder: Path
 ) -> None:
 	logger.info("Verifying managed mods...")
 	storage_manager: ModStorageManager = ModStorageManager.from_file()
 	storage_manager.validate()
 	logger.info(f"Verified managed mods integrity")
 
-	mods_need_download: list[Mod] = filter_need_download_mods(bonelab_game, available_mods, storage_manager)
+	mods_need_download: list[ModWithModfile] = filter_need_download_mods(bonelab_game, available_mods, storage_manager)
 	logger.info(f"{len(mods_need_download)} mod(s) to download")
 	logger.debug(f"Mods to download: {mods_need_download}")
 
@@ -183,23 +183,58 @@ async def _sync(
 
 
 def _usage(name: str) -> None:
-	print(f"Usage: {name} {{sync | export | import}}")
+	print(f"Usage:")
+	print(f"\t{name} [sync]")
+	print(f"\t{name} export")
+	print(f"\t{name} import <subs.json>")
 
 
-def _export(bonelab_game: Game, available_mods: list[Mod]) -> None:
-	export_content: dict[str, list[str]] = {
-		bonelab_game.name_id: [
-			available_mod.name_id
-			for available_mod in available_mods
-		]
-	}
+def _export(bonelab_game: Game, available_mods: list[ModWithModfile]) -> None:
+	logger.info(f"Exporting mod subscriptions for {bonelab_game.name_id}")
+	export_content: SubscriptionsExport = SubscriptionsExport(
+		subscriptions={
+			bonelab_game.name_id: SubscriptionsForGame(
+				game=bonelab_game,
+				mods=available_mods
+			)
+		}
+	)
 	timestamp: str = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 	filename: str = f"subs_export_{timestamp}.json"
 	file_path: Path = EXPORTS_PATH / filename
 	file_path.parent.mkdir(parents=True, exist_ok=True)
 	logger.info(f"Exporting subscriptions to {file_path}")
 	with open(file_path, mode='w', encoding='utf8', newline='\n') as f:
-		json.dump(export_content, f, indent='\t')
+		as_json: str = export_content.json(indent='\t', ensure_ascii=False)
+		f.write(as_json)
+
+
+async def _import(subs_file: str, client: ApiClient, bonelab_game: Game, my_mods: list[ModWithModfile]) -> None:
+	subs_file: Path = Path(subs_file)
+	logger.info(f"Importing subscriptions from {subs_file}")
+	if not subs_file.is_file():
+		print(f"{subs_file}: not a valid path")
+		return
+
+	subscriptions_export: SubscriptionsExport = SubscriptionsExport.parse_file(subs_file)
+	bonelab_subscriptions: SubscriptionsForGame = subscriptions_export.subscriptions[bonelab_game.name_id]
+	export_bonelab_mods: set[int] = {mod.id for mod in bonelab_subscriptions.mods}
+
+	logger.info(f"Parsed {len(export_bonelab_mods)} subscriptions for {bonelab_game.name_id}")
+
+	my_subbed_mod_id_set: set[int] = {mod.id for mod in my_mods}
+	missing_sub_mod_ids: list[int] = list(export_bonelab_mods - my_subbed_mod_id_set)
+
+	if len(missing_sub_mod_ids) > 0:
+		logger.info(f"Adding {len(missing_sub_mod_ids)} new subscription(s) for {bonelab_game.name_id}")
+		logger.debug(f"{missing_sub_mod_ids}")
+		subbed_mods: list[ModWithModfile] = await client.sub_to_mods_concurrently(
+			bonelab_game.id, missing_sub_mod_ids
+		)
+		logger.info(f"Added {len(subbed_mods)} new subscription(s) for {bonelab_game.name_id}")
+		logger.debug(f"{subbed_mods}")
+	else:
+		logger.info("No new subscriptions, skipping...")
 
 
 async def main() -> None:
@@ -220,15 +255,15 @@ async def main() -> None:
 	bonelab_game: Game = await get_game_by_name_id(client, BONELAB_NAME_ID)
 	logger.debug(f"Got target game: {bonelab_game}")
 
-	my_mods: list[Mod] = await client.get_mod_subscriptions(
+	my_mods: list[ModWithModfile] = await client.get_mod_subscriptions(
 		game_id=bonelab_game.id, platform=TargetPlatform.WINDOWS
 	)
 	logger.info(f"Found {len(my_mods)} mod(s) subscriptions for {bonelab_game}")
 	logger.debug(f"{my_mods=}")
 
-	unavailable_mods: list[Mod]
-	available_mods: list[Mod]
-	available_mods, unavailable_mods = binary_partition(my_mods, Mod.is_available)
+	unavailable_mods: list[ModWithModfile]
+	available_mods: list[ModWithModfile]
+	available_mods, unavailable_mods = binary_partition(my_mods, ModWithModfile.is_available)
 
 	if len(unavailable_mods) > 0:
 		logger.warning(f"{len(unavailable_mods)} mod(s) unavailable")
@@ -249,9 +284,9 @@ async def main() -> None:
 			)
 		case ["export"]:
 			_export(bonelab_game, available_mods)
-		case ["import"]:
-			pass
-		case [*invalid_args]:
+		case ["import", subs_file]:
+			await _import(subs_file=subs_file, client=client, bonelab_game=bonelab_game, my_mods=my_mods)
+		case [*_invalid_args]:
 			_usage(name)
 
 	logger.info(f"Closing...")

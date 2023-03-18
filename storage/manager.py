@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 import logger
 from api_client.models.game import Game
-from api_client.models.mod import Mod
+from api_client.models.mod import ModWithModfile
 from api_client.models.platform import TargetPlatform
 from downloader_client.task import DownloadResult
 from installer.task import InstallationResult, InstallationTask
@@ -107,7 +107,7 @@ class ModStorageManager:
 		self._save_to_file()
 
 	def generate_mod_install_tasks(
-			self, game: Game, mods: list[Mod], platform: TargetPlatform
+			self, game: Game, mods: list[ModWithModfile], platform: TargetPlatform
 	) -> list[InstallationTask]:
 		try:
 			managed_mods_dict: dict[str, ManagedMod] = self._storage.games[game.name_id]
@@ -115,7 +115,7 @@ class ModStorageManager:
 			return []
 
 		installation_tasks: list[InstallationTask] = []
-		mod: Mod
+		mod: ModWithModfile
 		for mod in mods:
 			mod_file_id: int = mod.get_platform(platform).modfile_live
 
@@ -170,7 +170,7 @@ class ModStorageManager:
 		self._save_to_file()
 
 	def remove_unsubscribed_mods(
-			self, game_name_id: str, mod_subscriptions: list[Mod]
+			self, game_name_id: str, mod_subscriptions: list[ModWithModfile]
 	) -> set[str]:
 		try:
 			managed_mods_dict: dict[str, ManagedMod] = self._storage.get_managed_mods_for_game(game_name_id)
