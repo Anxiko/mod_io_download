@@ -1,12 +1,11 @@
 from typing import Generic, TypeVar
 
-from pydantic import StrictInt
-from pydantic.generics import GenericModel
+from pydantic import StrictInt, BaseModel
 
 ResponseType = TypeVar("ResponseType")
 
 
-class PaginatedResponse(GenericModel, Generic[ResponseType]):
+class PaginatedResponse(BaseModel, Generic[ResponseType]):
 	data: list[ResponseType]
 	result_count: StrictInt
 	result_offset: StrictInt
